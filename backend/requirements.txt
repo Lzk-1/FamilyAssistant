@@ -1,0 +1,4 @@
+# 运行时依赖（刻意保持最小，见 docs/architecture.md 第 3 节选型说明）
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9

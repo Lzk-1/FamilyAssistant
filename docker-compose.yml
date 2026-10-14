@@ -1,0 +1,16 @@
+# 云服务器部署示例：docker compose up -d
+# 全部持久化状态（SQLite + 上传文件）落在宿主机 ./data 目录，备份该目录即完成数据备份。
+services:
+  family-assistant:
+    build: .
+    container_name: family-assistant
+    ports:
+      - "8300:8300"
+    environment:
+      FA_HOST: 0.0.0.0
+      # 对公网开放时建议改为 "true"（须先修改 admin 默认密码，见 docs/architecture.md 第 8 节）
+      FA_AUTH_ENABLED: "false"
+      # FA_SECRET_KEY: 生产环境务必设置
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

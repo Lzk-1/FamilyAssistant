@@ -1,0 +1,210 @@
+/* ============================================================
+   FamilyAssistant 全局样式
+   设计规范：docs/ui-design.md
+   组织顺序：设计令牌 → 基础 → 布局 → 侧边导航 → 页头 → 组件 → 响应式
+   ============================================================ */
+
+/* ---------- 1. 设计令牌（规范第 2 章） ---------- */
+:root {
+  /* 品牌色 */
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: #eff6ff;
+
+  /* 模块主题色（导航图标 / 页头徽标 / 模块强调元素） */
+  --m-finance: #16a34a;
+  --m-house: #f59e0b;
+  --m-car: #0891b2;
+  --m-memo: #7c3aed;
+  --m-files: #475569;
+  --m-finance-soft: #f0fdf4;
+  --m-house-soft: #fffbeb;
+  --m-car-soft: #ecfeff;
+  --m-memo-soft: #f5f3ff;
+  --m-files-soft: #f1f5f9;
+
+  /* 语义色 */
+  --ok: #22c55e;   --ok-soft: #f0fdf4;
+  --warn: #d97706; --warn-soft: #fffbeb;
+  --err: #ef4444;  --err-soft: #fef2f2;
+  --info-soft: #eff6ff;
+
+  /* 中性色 */
+  --text: #1f2937;
+  --text-muted: #6b7280;
+  --text-faint: #94a3b8;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --bg: #f3f4f6;
+  --card-bg: #ffffff;
+  --sidebar-bg: #1f2937;
+  --sidebar-text: #cbd5e1;
+
+  /* 间距（4px 基数） */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+
+  /* 圆角 / 阴影 */
+  --radius: 12px;
+  --radius-s: 8px;
+  --radius-full: 999px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* ---------- 2. 基础 ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.muted { color: var(--text-muted); font-size: 13px; }
+
+/* ---------- 3. 布局：侧边导航 + 内容区 ---------- */
+.layout { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+
+.view { padding: 28px 32px; width: 100%; max-width: 1100px; }
+
+/* ---------- 4. 侧边栏与导航 ---------- */
+.sidebar {
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: 20px 14px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
+.brand-logo {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: var(--primary); color: #fff;
+  font-size: 20px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.brand-title { font-size: 18px; color: #fff; }
+.brand-sub { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+
+.nav { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.nav a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-s);
+  color: var(--sidebar-text);
+  text-decoration: none;
+  font-size: 14px;
+  transition: background 0.15s, color 0.15s;
+}
+.nav a:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.nav a svg { flex-shrink: 0; }
+
+/* 导航图标继承模块主题色（规范 4.9） */
+.nav a[data-key="finance"] svg { color: var(--m-finance); }
+.nav a[data-key="house"]   svg { color: var(--m-house); }
+.nav a[data-key="car"]     svg { color: var(--m-car); }
+.nav a[data-key="memo"]    svg { color: var(--m-memo); }
+.nav a[data-key="files"]   svg { color: var(--m-files); }
+
+/* 选中态填充对应模块主题色（规范第 3 章） */
+.nav a.active[data-key="finance"] { background: var(--m-finance); color: #fff; }
+.nav a.active[data-key="house"]   { background: var(--m-house);   color: #fff; }
+.nav a.active[data-key="car"]     { background: var(--m-car);     color: #fff; }
+.nav a.active[data-key="memo"]    { background: var(--m-memo);    color: #fff; }
+.nav a.active[data-key="files"]   { background: var(--m-files);   color: #fff; }
+.nav a.active svg { color: #fff; }
+
+.sidebar-footer {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-faint); padding: 0 8px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
+.dot.ok { background: var(--ok); }
+.dot.err { background: var(--err); }
+
+/* ---------- 5. 页头（模块徽标 + 标题 + 里程碑标签） ---------- */
+.page-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: var(--sp-5);
+}
+.page-header__main { display: flex; align-items: center; gap: 14px; }
+.page-header h2 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+.page-header p { color: var(--text-muted); font-size: 13px; }
+
+.module-badge {
+  width: 42px; height: 42px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.module-badge[data-key="finance"] { background: var(--m-finance-soft); color: var(--m-finance); }
+.module-badge[data-key="house"]   { background: var(--m-house-soft);   color: var(--m-house); }
+.module-badge[data-key="car"]     { background: var(--m-car-soft);     color: var(--m-car); }
+.module-badge[data-key="memo"]    { background: var(--m-memo-soft);    color: var(--m-memo); }
+.module-badge[data-key="files"]   { background: var(--m-files-soft);   color: var(--m-files); }
+.module-badge--lg { width: 72px; height: 72px; border-radius: 16px; }
+
+/* ---------- 6. 组件 ---------- */
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow-1);
+}
+.card + .card { margin-top: var(--sp-4); }
+.card h3 { font-size: 15px; margin-bottom: var(--sp-3); }
+
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th, .table td {
+  text-align: left; padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.table th { color: var(--text-muted); font-weight: 600; background: #f9fafb; white-space: nowrap; }
+.table td { font-variant-numeric: tabular-nums; }
+.table tr:last-child td { border-bottom: none; }
+
+.empty { text-align: center; color: var(--text-muted); padding: 40px 0; }
+.empty strong { display: block; font-size: 15px; color: var(--text); margin-bottom: 6px; }
+
+.banner { padding: 12px 16px; border-radius: var(--radius-s); margin-bottom: var(--sp-4); font-size: 14px; }
+.banner.error { background: var(--err-soft); color: #b91c1c; border: 1px solid #fecaca; }
+
+/* 状态标签（规范 4.5） */
+.fa-tag {
+  display: inline-flex; align-items: center;
+  height: 22px; padding: 0 8px;
+  border-radius: var(--radius-full);
+  font-size: 12px; white-space: nowrap;
+  flex-shrink: 0;
+}
+.fa-tag--primary { background: var(--primary-soft); color: var(--primary); }
+.fa-tag--ok      { background: var(--ok-soft);   color: var(--ok); }
+.fa-tag--warn    { background: var(--warn-soft); color: var(--warn); }
+.fa-tag--danger  { background: var(--err-soft);  color: var(--err); }
+.fa-tag--muted   { background: #f1f5f9; color: var(--text-muted); }
+
+/* 模块占位卡片（框架阶段"建设中"页） */
+.placeholder-card { text-align: center; padding: 56px 24px; }
+.placeholder-card h3 { font-size: 16px; margin: 16px 0 8px; }
+.placeholder-card .muted { font-size: 13px; }
+.placeholder-features { margin-top: 14px; font-size: 13px; color: var(--text-muted); }
+
+/* ---------- 7. 响应式 ---------- */
+@media (max-width: 768px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; gap: 12px; padding: 12px 16px; }
+  .nav { flex-direction: row; overflow-x: auto; }
+  .nav a { white-space: nowrap; }
+  .view { padding: var(--sp-4); }
+  .page-header { flex-direction: column; gap: var(--sp-3); }
+}

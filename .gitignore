@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# 运行时数据（SQLite + 上传文件，即全部持久化状态；备份此目录即完成数据备份）
+data/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
