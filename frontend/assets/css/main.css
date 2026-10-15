@@ -340,6 +340,11 @@ textarea.fa-input { height: auto; padding: 8px 12px; line-height: 1.5; resize: v
 .chart-bar__track { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; min-height: 0; }
 .chart-bar__fill { width: 70%; min-height: 2px; border-radius: 4px 4px 0 0; transition: height 0.3s; }
 .chart-bar__label { font-size: 10px; color: var(--text-faint); margin-top: 4px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* 负值模式（M3a 收益分析）：0 基线居中，正柱向上、负柱向下 */
+.chart-bar__track--split { position: relative; align-items: stretch; }
+.chart-bar__track--split::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--border); }
+.chart-bar__fill--pos { position: absolute; bottom: 50%; width: 70%; }
+.chart-bar__fill--neg { position: absolute; top: 50%; width: 70%; border-radius: 0 0 4px 4px; }
 
 /* 统计卡片网格 */
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-4); align-items: stretch; }

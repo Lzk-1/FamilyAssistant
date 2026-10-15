@@ -616,3 +616,154 @@ def test_compare_assets() -> None:
         # 空 items 正常返回
         assert client.get("/api/v1/finance/assets/compare", params={"ids": "99999"}) \
             .json()["data"]["items"] == []
+
+
+# ============ 收益分析（M3a · finance-module-design §5.6） ============
+
+def analytics_data(client: TestClient, months: int = 12) -> dict:
+    return client.get(f"/api/v1/finance/analytics?months={months}").json()["data"]
+
+
+def test_analytics_empty() -> None:
+    with make_client()[0] as client:
+        data = client.get("/api/v1/finance/analytics").json()["data"]
+        assert data["summary"] == {
+            "realized_total_cents": 0, "realized_recent_cents": 0,
+            "pending_estimated_cents": 0, "unrealized_pnl_cents": 0,
+            "weighted_actual_rate": None,
+        }
+        assert len(data["monthly"]) == 12
+        assert all(m["realized_cents"] == 0 for m in data["monthly"])
+        assert data["monthly"][-1]["month"] == date.today().isoformat()[:7]
+        assert data["by_category"] == [] and data["by_member"] == [] and data["details"] == []
+        # months 参数范围：越界 422，下界 1
+        assert client.get("/api/v1/finance/analytics?months=99").status_code == 422
+        assert len(analytics_data(client, months=1)["monthly"]) == 1
+
+
+def test_analytics_interest_spread_and_details() -> None:
+    """理财收益录入：首录区间线性分摊（跨月守恒）+ 二次录入差值 + 明细原始事件。"""
+    with make_client()[0] as client:
+        w = create_asset(client, name="招行理财", category="wealth", amount_cents=1_000_000,
+                         start_date=day(-90), end_date=day(60),
+                         extra={"risk_level": "R2", "base_rate": 2.5})
+        client.post(f"/api/v1/finance/assets/{w['id']}/interest",
+                    json={"interest_cents": 6_000, "value_date": day(-30)})
+        data = analytics_data(client)
+        # 首录 6,000 分分摊在 day(-90)→day(-30) 共 60 天（跨 ≥2 个日历月），分摊和守恒
+        assert data["summary"]["realized_total_cents"] == 6_000
+        assert sum(m["realized_cents"] for m in data["monthly"]) == 6_000
+        assert len([m for m in data["monthly"] if m["realized_cents"] > 0]) >= 2
+        # 明细记录原始事件（非分摊值）
+        assert len(data["details"]) == 1
+        assert data["details"][0]["kind"] == "interest_input"
+        assert data["details"][0]["kind_label"] == "收益录入"
+        assert data["details"][0]["amount_cents"] == 6_000
+        assert "累计" in data["details"][0]["note"]
+        # 分类/成员聚合
+        assert data["by_category"] == [{"code": "wealth", "label": "理财产品", "realized_cents": 6_000}]
+        assert data["by_member"] == [{"member_id": 1, "name": "本人", "realized_cents": 6_000}]
+
+        # 二次录入：差值 3,000 分摊 day(-30)→day(-10)
+        client.post(f"/api/v1/finance/assets/{w['id']}/interest",
+                    json={"interest_cents": 9_000, "value_date": day(-10)})
+        data = analytics_data(client)
+        assert data["summary"]["realized_total_cents"] == 9_000
+        assert sum(m["realized_cents"] for m in data["monthly"]) == 9_000
+        # 明细按日期倒序：最新事件在前
+        assert [d["amount_cents"] for d in data["details"]] == [3_000, 6_000]
+
+
+def test_analytics_interest_negative_delta() -> None:
+    """理财收益回调：累计值下降产生负增量，总额与明细如实记录。"""
+    with make_client()[0] as client:
+        w = create_asset(client, category="wealth", amount_cents=1_000_000,
+                         start_date=day(-40), end_date=day(60))
+        client.post(f"/api/v1/finance/assets/{w['id']}/interest",
+                    json={"interest_cents": 5_000, "value_date": day(-20)})
+        client.post(f"/api/v1/finance/assets/{w['id']}/interest",
+                    json={"interest_cents": 3_000, "value_date": day(-10)})
+        data = analytics_data(client)
+        # 全历史 = 5,000 - 2,000 = 3,000
+        assert data["summary"]["realized_total_cents"] == 3_000
+        assert sum(m["realized_cents"] for m in data["monthly"]) == 3_000
+        neg = [d for d in data["details"] if d["amount_cents"] < 0]
+        assert neg and neg[0]["amount_cents"] == -2_000
+        assert "回调" in neg[0]["note"]
+
+
+def test_analytics_fixed_deposit_maturity() -> None:
+    """到期定期：全期利息按 end_date 所在月归集；未到期定期计入在途预计。"""
+    with make_client()[0] as client:
+        matured = create_asset(client, name="工行定期", category="fixed_deposit",
+                               amount_cents=10_000_000, start_date=day(-400), end_date=day(-10),
+                               annual_rate=2.0)
+        pending = create_asset(client, name="中行定期", category="fixed_deposit",
+                               amount_cents=10_000_000, start_date=day(-30), end_date=day(330),
+                               annual_rate=3.0)
+        # 期望值与创建后 computed 的到期利息一致（公式口径复用）
+        expected = client.get(f"/api/v1/finance/assets/{matured['id']}") \
+            .json()["data"]["computed"]["interest_cents"]
+        exp_pending = client.get(f"/api/v1/finance/assets/{pending['id']}") \
+            .json()["data"]["computed"]["interest_cents"]
+        data = analytics_data(client)
+        assert data["summary"]["realized_total_cents"] == expected
+        assert data["summary"]["realized_recent_cents"] == expected
+        month_map = {m["month"]: m["realized_cents"] for m in data["monthly"]}
+        assert month_map[day(-10)[:7]] == expected  # 归集到 end_date 所在月
+        assert data["summary"]["pending_estimated_cents"] == exp_pending
+        assert data["details"][0]["kind"] == "maturity"
+        assert data["details"][0]["asset_name"] == "工行定期"
+
+
+def test_analytics_withdraw_gap() -> None:
+    """定期提前支取带实际金额：差额归集；理财赎回差额扣除已录收益后并入。"""
+    with make_client()[0] as client:
+        dep = create_asset(client, category="fixed_deposit", amount_cents=1_000_000,
+                           start_date=day(-120), end_date=day(120), annual_rate=2.0)
+        r = client.post(f"/api/v1/finance/assets/{dep['id']}/settle",
+                        json={"action": "withdraw", "amount_cents": 1_005_000})
+        assert r.json()["data"]["settled"] is True
+        data = analytics_data(client)
+        assert data["summary"]["realized_total_cents"] == 5_000
+        assert data["details"][0]["kind"] == "withdraw_gap"
+        assert data["details"][0]["amount_cents"] == 5_000
+
+        # 理财：先录入收益再赎回 → 差额 = 实际 - 本金 - 已录累计
+        w = create_asset(client, name="理财", category="wealth", amount_cents=1_000_000,
+                         start_date=day(-100), end_date=day(50))
+        client.post(f"/api/v1/finance/assets/{w['id']}/interest",
+                    json={"interest_cents": 8_000, "value_date": day(-5)})
+        client.post(f"/api/v1/finance/assets/{w['id']}/settle",
+                    json={"action": "withdraw", "amount_cents": 1_011_000})
+        data = analytics_data(client)
+        # 定期 5,000 + 理财录入 8,000 + 理财赎回差额 3,000 = 16,000
+        assert data["summary"]["realized_total_cents"] == 16_000
+        kinds = {d["kind"] for d in data["details"]}
+        assert kinds == {"withdraw_gap", "interest_input"}
+
+
+def test_analytics_floating_pnl_and_weighted_rate() -> None:
+    """浮动盈亏独立展示（不混入已实现）；实际年化按本金加权。"""
+    with make_client()[0] as client:
+        # 贵金属：10 克 × (5,200-5,000) = +2,000 分
+        create_asset(client, name="黄金积存", category="metal", amount_cents=50_000,
+                     extra={"variety": "gold", "form": "accumulate", "quantity": 10,
+                            "cost_price_cents": 5_000, "current_price_cents": 5_200})
+        # 股票：市值 10,000 - 成本 11,000 = -1,000 分
+        create_asset(client, name="沪深300ETF", category="stock", amount_cents=10_000,
+                     extra={"code": "510300", "market": "sh", "quantity": 1000, "cost_cents": 11_000})
+        # 理财 A：本金 1 万、持有一年录入 30,000 分（3%）/ 理财 B：本金 2 万录入 20,000 分（1%）
+        wa = create_asset(client, name="理财A", category="wealth", amount_cents=1_000_000,
+                          start_date=day(-365), end_date=day(30))
+        client.post(f"/api/v1/finance/assets/{wa['id']}/interest",
+                    json={"interest_cents": 30_000, "value_date": day(0)})
+        wb = create_asset(client, name="理财B", category="wealth", amount_cents=2_000_000,
+                          start_date=day(-365), end_date=day(30))
+        client.post(f"/api/v1/finance/assets/{wb['id']}/interest",
+                    json={"interest_cents": 20_000, "value_date": day(0)})
+        data = analytics_data(client)
+        assert data["summary"]["unrealized_pnl_cents"] == 1_000  # 2,000 - 1,000
+        assert data["summary"]["realized_total_cents"] == 50_000  # 仅理财录入
+        # 加权实际年化 (3%×100万 + 1%×200万) ÷ 300万 = 1.67%
+        assert data["summary"]["weighted_actual_rate"] == 1.67

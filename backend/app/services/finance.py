@@ -1064,3 +1064,217 @@ def compare_assets(conn: sqlite3.Connection, ids: list[int]) -> dict:
             "floating": row["category"] in _FLOATING_CATEGORIES,
         })
     return {"items": items}
+
+
+# ============================================================
+# 收益分析（M3a · docs/finance-module-design.md §5.6）
+# ============================================================
+
+_KIND_LABELS = {"maturity": "到期利息", "interest_input": "收益录入", "withdraw_gap": "赎回/支取差额"}
+
+
+def _spread(delta: int, from_day: date, to_day: date) -> dict[str, int]:
+    """增量区间线性分摊：按天分摊到覆盖各月（月 → 分）。
+
+    区间 [from_day, to_day) 共 (to-from).days 天；同日/倒序区间全归 from_day 所在月；
+    整数分守恒（日均 = delta // days，余数补前几天），负增量同样守恒。
+    """
+    if to_day <= from_day or delta == 0:
+        return {from_day.isoformat()[:7]: delta} if delta else {}
+    days = (to_day - from_day).days
+    daily, rem = divmod(delta, days)
+    months: dict[str, int] = {}
+    for i in range(days):
+        key = (from_day + timedelta(days=i)).isoformat()[:7]
+        months[key] = months.get(key, 0) + daily + (1 if i < rem else 0)
+    return months
+
+
+def _full_term_interest_cents(asset: dict) -> int | None:
+    """年利率类整期到期利息推算：本金 × 年利率 × 月数 / 12（定期/国债/外借等）。"""
+    start = _parse_date(asset["start_date"], "start_date", [])
+    end = _parse_date(asset["end_date"], "end_date", [])
+    rate = asset["annual_rate"]
+    if not (start and end and rate):
+        return None
+    return _cents(asset["amount_cents"] * rate / 100 * _months_between(start, end) / 12)
+
+
+def analytics(conn: sqlite3.Connection, months: int = 12) -> dict:
+    """收益分析（M3a）：已实现收益按月归集 + 分类/成员贡献 + 明细。
+
+    口径（三类严格区分）：
+    - 已实现：理财收益录入增量（区间线性分摊）、年利率类到期利息（end_date 已过）、
+      赎回/支取差额（带实际金额时 = 实际 - 本金 - 已录收益）；
+    - 预计在途：holding 且未到期资产的推算到期利息（不按月归集）；
+    - 浮动盈亏：贵金属/股票 pnl（未实现），独立展示不混算。
+    """
+    try:
+        months = max(1, min(int(months), 24))
+    except (TypeError, ValueError):
+        months = 12
+    today = _today()
+    window_start = _add_months(date(today.year, today.month, 1), -(months - 1))
+
+    all_rows = Database.query(
+        conn, "SELECT * FROM finance_assets WHERE is_deleted = 0 AND direction = 'asset' ORDER BY id"
+    )
+    members = {m["id"]: m["name"] for m in list_members(conn)}
+    categories = {c["code"]: c["name"] for c in list_categories(conn)}
+
+    monthly_acc: dict[str, int] = {}   # 月 → 已实现（分摊口径，含窗口外）
+    by_category: dict[str, int] = {}  # 全历史已实现
+    by_member: dict[int, int] = {}    # 全历史已实现
+    details: list[dict] = []          # 原始事件粒度
+    pending_estimated = 0
+    unrealized_pnl = 0
+    weighted_rate_sum = 0.0
+    weighted_base = 0
+
+    def add_month(month: str, amount: int) -> None:
+        monthly_acc[month] = monthly_acc.get(month, 0) + amount
+
+    def add_gain(amount: int, asset: dict, kind: str, day_iso: str, note: str = "") -> None:
+        """分类/成员聚合与明细按原始事件金额记录（与月度分摊口径独立）。"""
+        if not amount:
+            return
+        by_category[asset["category"]] = by_category.get(asset["category"], 0) + amount
+        by_member[asset["holder_member_id"]] = by_member.get(asset["holder_member_id"], 0) + amount
+        details.append({
+            "date": day_iso, "asset_id": asset["id"], "asset_name": asset["name"],
+            "category": asset["category"],
+            "category_label": categories.get(asset["category"], asset["category"]),
+            "holder_member_id": asset["holder_member_id"],
+            "holder_name": members.get(asset["holder_member_id"], "—"),
+            "kind": kind, "kind_label": _KIND_LABELS[kind],
+            "amount_cents": amount, "note": note,
+        })
+
+    for asset in all_rows:
+        category = asset["category"]
+        start = _parse_date(asset["start_date"], "start_date", [])
+        end = _parse_date(asset["end_date"], "end_date", [])
+        holding = asset["status"] == "holding"
+        wealth_events: list[tuple[date, int]] = []
+
+        # ① 理财收益录入增量：累计值差分 → 区间线性分摊到各月
+        if category == "wealth":
+            for row in Database.query(
+                conn, "SELECT detail FROM finance_asset_events WHERE asset_id = ? AND event_type = 'interest'",
+                (asset["id"],),
+            ):
+                detail = json.loads(row["detail"])
+                d = _parse_date(str(detail.get("date", "")), "date", [])
+                if d:
+                    wealth_events.append((d, int(detail.get("interest_cents", 0))))
+            wealth_events.sort(key=lambda r: r[0])
+            prev_day = start or (wealth_events[0][0] if wealth_events else None)
+            prev_value = 0
+            for d, value in wealth_events:
+                delta = value - prev_value
+                if delta and prev_day:
+                    for month, amount in _spread(delta, prev_day, d).items():
+                        add_month(month, amount)
+                    note = f"累计 ¥{value / 100:,.2f}" + ("（较上次回调）" if delta < 0 else "")
+                    add_gain(delta, asset, "interest_input", d.isoformat(), note)
+                prev_day, prev_value = d, value
+
+        # ② 赎回差额：理财提前赎回带实际金额时 = 实际 - 本金 - 已录累计收益
+        if category == "wealth" and asset["status"] == "settled" and asset["settle_action"] == "withdraw":
+            settle = _row(
+                conn, "SELECT detail, created_at FROM finance_asset_events "
+                "WHERE asset_id = ? AND event_type = 'settle' ORDER BY id DESC LIMIT 1", (asset["id"],)
+            )
+            if settle:
+                actual = json.loads(settle["detail"]).get("amount_cents")
+                if actual is not None:
+                    recorded = wealth_events[-1][1] if wealth_events else 0
+                    gap = int(actual) - asset["amount_cents"] - recorded
+                    day_iso = str(settle["created_at"])[:10]
+                    add_month(day_iso[:7], gap)
+                    add_gain(gap, asset, "withdraw_gap", day_iso, f"实际到账 ¥{int(actual) / 100:,.2f}")
+
+        # ③ 年利率类（定期/国债/外借…）：到期利息归集或计入在途预计
+        full_interest = _full_term_interest_cents(asset)
+        if full_interest is not None and category != "wealth":
+            if holding:
+                if end and end <= today:
+                    add_month(end.isoformat()[:7], full_interest)
+                    add_gain(full_interest, asset, "maturity", end.isoformat())
+                else:
+                    pending_estimated += full_interest
+            else:
+                action = asset["settle_action"] or "clear"
+                settle = _row(
+                    conn, "SELECT detail, created_at FROM finance_asset_events "
+                    "WHERE asset_id = ? AND event_type = 'settle' ORDER BY id DESC LIMIT 1", (asset["id"],)
+                )
+                day_iso = str(settle["created_at"])[:10] if settle else str(asset["settled_at"] or "")[:10]
+                settle_day = _parse_date(day_iso, "settle_day", [])
+                if action == "withdraw" and start and settle_day:
+                    actual = json.loads(settle["detail"]).get("amount_cents") if settle else None
+                    if actual is not None:
+                        gap = int(actual) - asset["amount_cents"]
+                        add_month(day_iso[:7], gap)
+                        add_gain(gap, asset, "withdraw_gap", day_iso, f"实际到账 ¥{int(actual) / 100:,.2f}")
+                    else:
+                        # 提前支取未提供实际金额：按实际持有月数推算
+                        held = _cents(asset["amount_cents"] * asset["annual_rate"] / 100
+                                      * _months_between(start, settle_day) / 12)
+                        add_month(day_iso[:7], held)
+                        add_gain(held, asset, "withdraw_gap", day_iso, "按持有月数推算")
+                elif end:
+                    # renew/clear 视为正常到期结清
+                    add_month(end.isoformat()[:7], full_interest)
+                    add_gain(full_interest, asset, "maturity", end.isoformat())
+
+        # ④ 预计在途：理财按业绩基准推算（仅未到期）
+        if holding and (end is None or end > today):
+            if category == "wealth":
+                extra = json.loads(asset["extra"] or "{}")
+                if start and end and extra.get("base_rate"):
+                    pending_estimated += _cents(
+                        asset["amount_cents"] * float(extra["base_rate"]) / 100 * (end - start).days / 365
+                    )
+
+        # ⑤ 浮动盈亏（未实现）：贵金属/股票
+        if holding and category in ("metal", "stock"):
+            unrealized_pnl += int(compute(conn, asset).get("pnl_cents", 0))
+
+        # ⑥ 加权实际年化：有收益录入的在持理财，按本金加权
+        if holding and category == "wealth":
+            rate = compute(conn, asset).get("actual_annualized_rate")
+            if rate is not None and asset["amount_cents"] > 0:
+                weighted_rate_sum += float(rate) * asset["amount_cents"]
+                weighted_base += asset["amount_cents"]
+
+    # 近 N 月完整月度序列（含零月）
+    monthly_series = []
+    for i in range(months):
+        key = _add_months(window_start, i).isoformat()[:7]
+        monthly_series.append({"month": key, "realized_cents": monthly_acc.get(key, 0)})
+
+    details.sort(key=lambda d: d["date"], reverse=True)
+
+    def _sorted_member() -> list[dict]:
+        return [
+            {"member_id": mid, "name": members.get(mid, "—"), "realized_cents": amount}
+            for mid, amount in sorted(by_member.items(), key=lambda kv: -kv[1])
+        ]
+
+    return {
+        "summary": {
+            "realized_total_cents": sum(by_category.values()),
+            "realized_recent_cents": sum(s["realized_cents"] for s in monthly_series),
+            "pending_estimated_cents": pending_estimated,
+            "unrealized_pnl_cents": unrealized_pnl,
+            "weighted_actual_rate": round(weighted_rate_sum / weighted_base, 2) if weighted_base else None,
+        },
+        "monthly": monthly_series,
+        "by_category": [
+            {"code": code, "label": categories.get(code, code), "realized_cents": amount}
+            for code, amount in sorted(by_category.items(), key=lambda kv: -kv[1])
+        ],
+        "by_member": _sorted_member(),
+        "details": details[:100],
+    }

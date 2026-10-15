@@ -155,22 +155,35 @@ export function lineChart(data, { height = 160, color = "#16a34a", areaColor = "
   return svg;
 }
 
-/** 柱状图（bar）：data=[{label, value, color?}] */
+/** 柱状图（bar）：data=[{label, value, color?}]；含负值时 0 基线居中、负柱向下（红色） */
 export function barChart(data, { height = 160 } = {}) {
   if (!data || data.length === 0) {
     return el("div", { class: "chart-bar chart-bar--empty", text: "暂无数据" });
   }
+  const hasNeg = data.some((d) => d.value < 0);
   const maxV = Math.max(...data.map((d) => d.value), 0) || 1;
+  const maxNeg = Math.max(...data.map((d) => -d.value), 0) || 1;
   const bars = data.map((d) => {
-    const pct = (d.value / maxV) * 100;
+    let fill;
+    if (!hasNeg) {
+      fill = el("div", {
+        class: "chart-bar__fill",
+        style: `height:${(d.value / maxV) * 100}%;background:${d.color || "#16a34a"}`,
+        title: `${d.label}: ¥${fmtMoney(d.value)}`,
+      });
+    } else {
+      // 中基线模式：正值向上（绿）、负值向下（红）
+      const neg = d.value < 0;
+      fill = el("div", {
+        class: `chart-bar__fill ${neg ? "chart-bar__fill--neg" : "chart-bar__fill--pos"}`,
+        style: neg
+          ? `height:${(Math.abs(d.value) / maxNeg) * 50}%;background:${d.color || "#ef4444"}`
+          : `height:${(d.value / maxV) * 50}%;background:${d.color || "#22c55e"}`,
+        title: `${d.label}: ¥${fmtMoney(d.value)}`,
+      });
+    }
     return el("div", { class: "chart-bar__item" }, [
-      el("div", { class: "chart-bar__track" }, [
-        el("div", {
-          class: "chart-bar__fill",
-          style: `height:${pct}%;background:${d.color || "#16a34a"}`,
-          title: `${d.label}: ¥${fmtMoney(d.value)}`,
-        }),
-      ]),
+      el("div", { class: `chart-bar__track${hasNeg ? " chart-bar__track--split" : ""}` }, [fill]),
       el("div", { class: "chart-bar__label", text: d.label }),
     ]);
   });

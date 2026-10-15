@@ -1,14 +1,15 @@
 /** 理财模块入口：子路由分发 + 二级 Tab 导航。
  *  路由约定：#/finance → 总览，#/finance/assets → 台账，#/finance/assets/:id → 详情，
- *  #/finance/calendar → 日历，#/finance/compare → 对比分析，#/finance/analytics → 收益分析（占位）。
+ *  #/finance/calendar → 日历，#/finance/compare → 对比分析，#/finance/analytics → 收益分析。
  */
 
-import { pageHeader, tabs, errorBanner, placeholderCard } from "../../ui.js";
+import { pageHeader, tabs, errorBanner } from "../../ui.js";
 import { renderOverview } from "./overview.js";
 import { renderLedger } from "./ledger.js";
 import { renderDetail } from "./detail.js";
 import { renderCalendar } from "./calendar.js";
 import { renderCompare } from "./compare.js";
+import { renderAnalytics } from "./analytics.js";
 
 const TABS = [
   { key: "overview", label: "总览" },
@@ -34,7 +35,7 @@ export function parseRoute() {
 }
 
 /** 从 section 推导 Tab 高亮项 */
-function tabKey(section, id) {
+function tabKey(section) {
   if (!section) return "overview";
   if (section === "assets") return "assets";
   if (section === "calendar") return "calendar";
@@ -58,7 +59,7 @@ export async function render(root, mod) {
   }
 
   // Tab 栏
-  const activeTab = tabKey(route.section, route.id);
+  const activeTab = tabKey(route.section);
   const tabBar = tabs(TABS, activeTab, (key) => {
     const paths = { overview: "#/finance", assets: "#/finance/assets", calendar: "#/finance/calendar", compare: "#/finance/compare", analytics: "#/finance/analytics" };
     location.hash = paths[key] || "#/finance";
@@ -84,7 +85,7 @@ export async function render(root, mod) {
         await renderCompare(content, mod);
         break;
       case "analytics":
-        content.appendChild(placeholderCard(mod, "月度收益分析 · 分类贡献率 · 年化收益率（M3 迭代交付）"));
+        await renderAnalytics(content, mod);
         break;
     }
   } catch (err) {

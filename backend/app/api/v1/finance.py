@@ -194,3 +194,9 @@ def calendar(
     conn=Depends(get_db),
 ) -> dict:
     return ok(finance_service.calendar(conn, from_date, to_date))
+
+
+@router.get("/analytics")
+def analytics(months: int = Query(12, ge=1, le=24), conn=Depends(get_db)) -> dict:
+    """收益分析（M3a）：已实现按月归集 + 分类/成员贡献 + 明细。"""
+    return ok(finance_service.analytics(conn, months))

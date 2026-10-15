@@ -63,19 +63,24 @@ export function card(title, content) {
   ]);
 }
 
-/** 数据表格。columns: [{label, key, render?}]；rows 为空时展示空状态。 */
-export function table(rows, columns) {
+/** 数据表格。columns: [{label, key, render?}]（render 可返回字符串或 DOM 节点）；
+ *  onRowClick(row) 行点击回调。rows 为空时展示空状态。 */
+export function table(rows, columns, { onRowClick } = {}) {
   if (!rows || rows.length === 0) {
     return emptyState("暂无数据", "功能开发完成后，这里将展示你的记录。");
   }
   const thead = el("thead", {}, [
     el("tr", {}, columns.map((col) => el("th", { text: col.label }))),
   ]);
-  const tbody = el("tbody", {}, rows.map((row) =>
-    el("tr", {}, columns.map((col) =>
-      el("td", { text: col.render ? col.render(row) : (row[col.key] ?? "—") })
-    ))
-  ));
+  const tbody = el("tbody", {}, rows.map((row) => {
+    const cells = columns.map((col) => {
+      const content = col.render ? col.render(row) : (row[col.key] ?? "—");
+      return content instanceof Node
+        ? el("td", {}, [content])
+        : el("td", { text: content });
+    });
+    return el("tr", onRowClick ? { onClick: () => onRowClick(row), style: "cursor:pointer" } : {}, cells);
+  }));
   return el("table", { class: "table" }, [thead, tbody]);
 }
 
