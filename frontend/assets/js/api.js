@@ -34,8 +34,10 @@ export const apiPut = (path, body) =>
 
 export const apiDelete = (path) => request(path, { method: "DELETE" });
 
-/** multipart 文件上传；onProgress 收 0~100 进度百分比，失败时 err.errors 为字段级错误清单。 */
-export function apiUpload(path, file, { onProgress, field = "upload" } = {}) {
+/** multipart 文件上传；onProgress 收 0~100 进度百分比，失败时 err.errors 为字段级错误清单。
+ * fields：附加表单字段（如导入备份的 mode）。
+ */
+export function apiUpload(path, file, { onProgress, field = "upload", fields = {} } = {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", BASE + path);
@@ -61,6 +63,7 @@ export function apiUpload(path, file, { onProgress, field = "upload" } = {}) {
     xhr.addEventListener("error", () => reject(new Error("网络错误，上传失败")));
     const form = new FormData();
     form.append(field, file);
+    for (const [k, v] of Object.entries(fields)) form.append(k, v);
     xhr.send(form);
   });
 }

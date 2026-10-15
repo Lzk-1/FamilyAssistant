@@ -251,12 +251,40 @@
 
 **交互**：分类环形图扇区点击跳台账分类筛选；成员环形图跳归属人筛选；明细行点击跳资产详情。月度柱状图含负值时自动切"0 基线居中"模式（正柱绿向上、负柱红向下）。
 
+### 5.7 数据导入导出（M3b · 已实现，v0.5.0）
+
+入口：资产台账页工具栏「导入 / 导出」按钮。核心实现 `backend/app/services/finance_io.py`（仅标准库 json/csv/zipfile）。
+
+**导出三种产物**：
+
+| 产物 | 端点 | 内容 |
+| --- | --- | --- |
+| CSV 资产列表 | `GET /finance/export?format=csv` | 未删除资产摘要表（UTF-8 BOM，Excel 直开），人工查看用，不做 CSV 导入 |
+| JSON 数据备份 | `GET /finance/export?format=json` | 六表全量快照（含软删除行与附件元数据），头部 `{format, version, exported_at, app_version, data}` |
+| ZIP 完整备份 | `GET /finance/export?format=json&attachments=1` | manifest.json + attachments/ 附件物理文件；缺失文件仅备元数据并计 warnings |
+
+**导入两种模式**（`POST /finance/import`，multipart：`upload` 备份文件 + `mode`，上限 200MB）：
+
+| 模式 | 行为 | 适用 |
+| --- | --- | --- |
+| merge（合并） | 按主键 upsert（categories 按 code，其余按 id），可恢复软删除行 | 同源备份恢复/合并 |
+| restore（清空恢复） | 先清空理财六表（删 assets 触发 CASCADE）与附件目录，再全量恢复到备份点 | 整机迁移/备份点回滚；前端红色警示 + 二次确认弹窗 |
+
+**导入实现约定**：
+
+1. 导入顺序按外键依赖：categories → members → assets → values → events → attachments；整个导入单事务，格式级错误回滚。
+2. 列名白名单（`_TABLE_COLUMNS`）防手改备份注入额外列名；缺失的 created_at/updated_at 补当前本地时间。
+3. user_id 跨机处理：members 可空 → 失效置 NULL；assets/events 不可空 → 归导入操作者。
+4. 行级失败（外键引用缺失/唯一约束冲突/必填字段缺失）跳过并计入 skipped 报告，不中断整体事务。
+5. 附件物理文件在 DB 事务 commit 成功后处理：restore 先清空附件目录再提取；ZIP 条目做路径穿越（zip slip）防护，物理文件失败仅告警不回滚 DB。
+6. 前端弹窗（`pages/finance/io.js`）：导出为三选项下载列表；导入为文件选择（.json/.zip）+ 模式单选，restore 展示危险警示并经 confirmModal 确认；结果按表展示导入行数、跳过明细与附件恢复数，关闭弹窗自动刷新台账。
+
 ## 6. 与既有架构的衔接
 
 | 项 | 衔接方式 |
 | --- | --- |
 | 数据库 | 新增迁移 `002_finance.sql`：`finance_members`（家庭成员字典，含 `user_id` 可空预留列）、`finance_assets`（通用字段 + `holder_member_id` 归属人 + `extra` JSON 存类型专属字段）、`finance_asset_values`（市值历史）、`finance_attachments`（附件）；替换 M0 占位的 `finance_accounts/finance_transactions`（该表尚无数据，直接删除） |
-| API | `/api/v1/finance/*`：members 字典 CRUD、assets CRUD（支持按归属人/分类/状态筛选）、attachments 上传/下载、calendar 到期清单、overview 汇总（含按成员分布）、values 市值历史、interest 实际收益录入（M2d，仅理财）、assets/compare 对比分析（M2c，详见 finance-compare-design.md）、analytics 收益分析（M3a） |
+| API | `/api/v1/finance/*`：members 字典 CRUD、assets CRUD（支持按归属人/分类/状态筛选）、attachments 上传/下载、calendar 到期清单、overview 汇总（含按成员分布）、values 市值历史、interest 实际收益录入（M2d，仅理财）、assets/compare 对比分析（M2c，详见 finance-compare-design.md）、analytics 收益分析（M3a）、export/import 数据导出导入（M3b，详见 §5.7） |
 | 前端 | 复用 ui.js 组件与 SVG 图表；`#/finance/*` 路由子导航（模块内二级 Tab） |
 | 多群组预留 | 全表带 `user_id`（M4 再加 `group_id`），与既有规范一致 |
 
@@ -267,7 +295,7 @@
 | **M2a** | 数据模型 + 家庭成员字典与归属人 + 台账 + 新增/编辑（核心分类：定期/活期/理财/贵金属/股票/外借/外债）+ 总览（卡片+环形图双维度+趋势） |
 | **M2b** | 资产详情（市值历史+附件归档）+ 到期日历 + 状态机/三级提醒 |
 | **M3a** | 收益分析页（已实现，v0.4.0） |
-| **M3b** | 房贷/信用卡等负债分类增强 + 导入导出 |
+| **M3b** | 数据导入导出（已实现，v0.5.0，详见 §5.7）；房贷/信用卡等负债分类增强（待实现） |
 
 ## 8. 待确认问题
 

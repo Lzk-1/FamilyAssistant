@@ -3,13 +3,14 @@
  */
 
 import { apiGet } from "../../api.js";
-import { el, btn, iconBtn, input, select, tag, emptyState, toast } from "../../ui.js";
+import { el, btn, input, select, tag, emptyState, toast } from "../../ui.js";
 import { icon } from "../../icons.js";
 import { fmtMoney, statusVariant, statusRowClass, dueText, STATUS_LABELS, CATEGORY_MAP, categoryColor, fetchMembers, toggleCompare, addManyToCompare, getCompareIds } from "./common.js";
 import { openAssetDialog } from "./dialog.js";
 import { openMembersDialog } from "./members.js";
+import { openExportDialog, openImportDialog } from "./io.js";
 
-export async function renderLedger(root, mod, query) {
+export async function renderLedger(root, query) {
   // 本地状态
   let currentCategory = query.category || "";
   let currentDirection = "";
@@ -152,6 +153,8 @@ export async function renderLedger(root, mod, query) {
       },
     }, [compareLabel]);
     toolbar.appendChild(compareBtn);
+    toolbar.appendChild(btn("导入", { variant: "secondary", size: "sm", icon: "upload", onClick: () => openImportDialog(refresh) }));
+    toolbar.appendChild(btn("导出", { variant: "secondary", size: "sm", icon: "download", onClick: openExportDialog }));
     toolbar.appendChild(btn("成员管理", { variant: "secondary", size: "sm", icon: "note", onClick: () => openMembersDialog(refresh) }));
     toolbar.appendChild(btn("新增资产", { variant: "primary", icon: "plus", onClick: () => openAssetDialog(null, refresh) }));
     syncCompareBtn();

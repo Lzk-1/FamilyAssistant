@@ -76,7 +76,7 @@ export async function render(root, mod) {
         await renderOverview(content, mod);
         break;
       case "assets":
-        await renderLedger(content, mod, route.query);
+        await renderLedger(content, route.query);
         break;
       case "calendar":
         await renderCalendar(content, mod);

@@ -6,16 +6,19 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 
 from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.responses import ok
 from app.services import finance as finance_service
+from app.services import finance_io
 from app.services.finance import MAX_FILE_SIZE
 
 router = APIRouter()
@@ -200,3 +203,43 @@ def calendar(
 def analytics(months: int = Query(12, ge=1, le=24), conn=Depends(get_db)) -> dict:
     """收益分析（M3a）：已实现按月归集 + 分类/成员贡献 + 明细。"""
     return ok(finance_service.analytics(conn, months))
+
+
+# ============ 导入导出（M3b · docs/finance-module-design.md §5.7） ============
+
+@router.get("/export")
+def export_backup(
+    format: str = Query("json"),
+    attachments: int = Query(0),
+    conn=Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """导出备份：json（全量）/ csv（资产列表）/ json+attachments=1 → zip（含附件）。"""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if format == "csv":
+        csv_text = finance_io.export_csv(conn)
+        return Response(csv_text, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="finance-assets-{stamp}.csv"'})
+    payload = finance_io.build_backup(conn)
+    if attachments:
+        content = finance_io.build_zip(settings.upload_dir, payload)
+        return Response(content, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="finance-backup-{stamp}.zip"'})
+    body = json.dumps(payload, ensure_ascii=False)
+    return Response(body, media_type="application/json; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="finance-backup-{stamp}.json"'})
+
+
+@router.post("/import")
+def import_backup(
+    upload: UploadFile = File(...),
+    mode: str = Form("merge"),
+    conn=Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    user=Depends(get_current_user),
+) -> dict:
+    """导入备份：merge（按主键合并）/ restore（清空后全量恢复，危险操作）。"""
+    data = upload.file.read(finance_io.MAX_IMPORT_SIZE + 1)
+    if len(data) > finance_io.MAX_IMPORT_SIZE:
+        raise AppError(4001, f"备份文件不能超过 {finance_io.MAX_IMPORT_SIZE // (1024 * 1024)} MB")
+    return ok(finance_io.import_backup(conn, settings.upload_dir, data, mode, user["id"]))
