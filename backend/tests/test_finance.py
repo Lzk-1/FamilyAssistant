@@ -157,6 +157,61 @@ def test_calc_formulas() -> None:
         assert lo["computed"]["can_settle"] is False
 
 
+def test_liability_compute_enhancements() -> None:
+    """房贷/信用卡自动计算（M3b 负债增强）：预计结清月、已还本金、下次扣款日、距还款日。"""
+    with make_client()[0] as client:
+        t = date.today()
+
+        # 房贷：剩余本金 10,000 元 ÷ 月供 1,000 元 → 整除 10 期；预计结清 = 当前月 + 10 期
+        g = create_asset(client, name="房贷", category="mortgage", direction="liability",
+                         amount_cents=1_000_000,
+                         extra={"total_cents": 2_000_000, "monthly_payment_cents": 100_000,
+                                "pay_day": 20})
+        c = g["computed"]
+        assert c["remaining_months"] == 10
+        idx = t.year * 12 + t.month - 1 + 10
+        assert c["payoff_month"] == f"{idx // 12}-{idx % 12 + 1:02d}"
+        assert c["paid_principal_cents"] == 1_000_000  # 贷款总额 − 剩余本金
+        # 下次扣款日：本月 20 日未过取本月，已过取下月；距今天数 0~31
+        expected = (date(t.year, t.month, 20) if t.day <= 20
+                    else date(t.year + (t.month == 12), t.month % 12 + 1, 20))
+        assert c["next_pay_date"] == expected.isoformat()
+        assert c["days_to_next_pay"] == (expected - t).days
+
+        # 非整除向上取整：10,500 元 ÷ 1,000 元 → 11 期
+        g2 = create_asset(client, name="房贷2", category="mortgage", direction="liability",
+                          amount_cents=1_050_000, extra={"monthly_payment_cents": 100_000})
+        assert g2["computed"]["remaining_months"] == 11
+        assert "payoff_month" in g2["computed"]
+
+        # 未填月供/总额 → 不输出推算字段（存量数据兼容）
+        g3 = create_asset(client, name="房贷3", category="mortgage", direction="liability",
+                          amount_cents=1_000_000, extra={})
+        assert "remaining_months" not in g3["computed"]
+        assert "payoff_month" not in g3["computed"]
+        assert "paid_principal_cents" not in g3["computed"]
+        assert "next_pay_date" not in g3["computed"]
+
+        # 信用卡：下一还款日 = 本月 25 日未过取本月，已过取下月
+        cc = create_asset(client, name="信用卡", category="credit_card", direction="liability",
+                          amount_cents=50_000,
+                          extra={"bill_day": 5, "repay_day": 25, "installment": 0})
+        c = cc["computed"]
+        assert c["remaining_cents"] == 50_000  # REPAYABLE 口径不受影响
+        expected = (date(t.year, t.month, 25) if t.day <= 25
+                    else date(t.year + (t.month == 12), t.month % 12 + 1, 25))
+        assert c["next_repay_date"] == expected.isoformat()
+        assert c["days_to_repay"] == (expected - t).days
+
+        # 今天即还款日（还款日限 1~28；月末 29~31 无法用今日作还款日，跳过）
+        if t.day <= 28:
+            cc2 = create_asset(client, name="信用卡2", category="credit_card", direction="liability",
+                               amount_cents=10_000, extra={"repay_day": t.day})
+            c2 = cc2["computed"]
+            assert c2["days_to_repay"] == 0
+            assert c2["next_repay_date"] == t.isoformat()
+
+
 # ============ 台账：模板 / 校验 / 筛选 / 编辑删除 ============
 
 def test_create_all_twelve_categories() -> None:

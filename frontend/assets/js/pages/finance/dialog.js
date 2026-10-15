@@ -248,7 +248,9 @@ export async function openAssetDialog(asset, onSaved) {
     formEl.appendChild(field("分类", catSelect, { required: true }));
     formEl.appendChild(field("方向", dirSelect, { required: true }));
     formEl.appendChild(field("归属人", holderSelect, { required: true }));
-    formEl.appendChild(field("机构/交易对手", input({
+    // 机构字段按分类改名（房贷=贷款银行、信用卡=发卡行，design §4.3）
+    const institutionLabel = { mortgage: "贷款银行", credit_card: "发卡行" }[form.category] || "机构/交易对手";
+    formEl.appendChild(field(institutionLabel, input({
       name: "institution", value: form.institution, placeholder: "银行/机构/借款人",
       onInput: (e) => { form.institution = e.target.value; },
     })));

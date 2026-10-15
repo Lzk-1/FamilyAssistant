@@ -107,6 +107,24 @@ export function monthsBetween(start, end) {
   return Math.max(months, 0);
 }
 
+/** 下一个「每月 day 日」（day 限 1~28，无月末溢出）：返回 {date: "YYYY-MM-DD", days}（镜像后端 _next_month_day） */
+export function nextMonthlyDay(day) {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  let candidate = new Date(now.getFullYear(), now.getMonth(), Number(day));
+  if (candidate < now) candidate = new Date(now.getFullYear(), now.getMonth() + 1, Number(day));
+  const days = Math.round((candidate - now) / 86400000);
+  const p = (n) => String(n).padStart(2, "0");
+  return { date: `${candidate.getFullYear()}-${p(candidate.getMonth() + 1)}-${p(candidate.getDate())}`, days };
+}
+
+/** "YYYY-MM" → "YYYY年M月" */
+export function fmtMonth(ym) {
+  if (!ym) return "—";
+  const [y, m] = String(ym).split("-");
+  return `${y}年${Number(m)}月`;
+}
+
 // ============================================================
 // 状态着色与文案
 // ============================================================
@@ -214,6 +232,32 @@ export function computePreview(category, form) {
     if (amountCents && costCents) {
       result.push({ label: "浮动盈亏", value: fmtMoney(amountCents - costCents) + " 元" });
     }
+  }
+
+  // 房贷：剩余期数 / 预计结清月 / 已还本金 / 下次扣款日（镜像后端 compute，M3b 负债增强）
+  if (category === "mortgage") {
+    const monthly = yuanToCents(form.extra?.monthly_payment || 0);
+    if (monthly > 0 && amountCents > 0) {
+      const months = Math.ceil(amountCents / monthly);
+      const now = new Date();
+      const idx = now.getFullYear() * 12 + now.getMonth() + months;
+      result.push({ label: "剩余期数", value: `${months} 期` });
+      result.push({ label: "预计结清", value: fmtMonth(`${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}`) });
+    }
+    const total = yuanToCents(form.extra?.total || 0);
+    if (total > amountCents) {
+      result.push({ label: "已还本金", value: fmtMoney(total - amountCents) + " 元" });
+    }
+    if (form.extra?.pay_day) {
+      const next = nextMonthlyDay(form.extra.pay_day);
+      result.push({ label: "下次扣款", value: next.days === 0 ? `今天（${next.date}）` : `${next.date}（${next.days} 天后）` });
+    }
+  }
+
+  // 信用卡：下一还款日 / 距还款日天数（M3b 负债增强）
+  if (category === "credit_card" && form.extra?.repay_day) {
+    const next = nextMonthlyDay(form.extra.repay_day);
+    result.push({ label: "下一还款日", value: next.days === 0 ? `今天（${next.date}）` : `${next.date}（${next.days} 天后）` });
   }
 
   if (end) {

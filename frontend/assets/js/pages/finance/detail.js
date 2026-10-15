@@ -4,7 +4,7 @@
 
 import { apiGet, apiPost, apiDelete, apiUpload } from "../../api.js";
 import { el, btn, iconBtn, card, tag, emptyState, modal, toast, confirmModal, input, field, errorBanner } from "../../ui.js";
-import { fmtMoney, dueText, statusVariant, STATUS_LABELS, SETTLE_LABELS, settleActions, CATEGORY_MAP, todayISO, yuanToCents } from "./common.js";
+import { fmtMoney, dueText, fmtMonth, statusVariant, STATUS_LABELS, SETTLE_LABELS, settleActions, CATEGORY_MAP, todayISO, yuanToCents } from "./common.js";
 import { openAssetDialog } from "./dialog.js";
 
 export async function renderDetail(root, assetId) {
@@ -49,6 +49,11 @@ export async function renderDetail(root, assetId) {
   if (c.pnl_cents != null) keyNumbers.appendChild(keyNum("浮动盈亏", fmtMoney(c.pnl_cents)));
   if (c.repaid_cents != null) keyNumbers.appendChild(keyNum("已还金额", fmtMoney(c.repaid_cents)));
   if (c.remaining_cents != null) keyNumbers.appendChild(keyNum("未还金额", fmtMoney(c.remaining_cents)));
+  if (c.remaining_months != null) keyNumbers.appendChild(keyNum("剩余期数", `${c.remaining_months} 期`));
+  if (c.payoff_month != null) keyNumbers.appendChild(keyNum("预计结清", fmtMonth(c.payoff_month)));
+  if (c.paid_principal_cents != null) keyNumbers.appendChild(keyNum("已还本金", fmtMoney(c.paid_principal_cents)));
+  if (c.next_pay_date) keyNumbers.appendChild(keyNum("下次扣款", c.days_to_next_pay === 0 ? `今天（${c.next_pay_date}）` : `${c.next_pay_date}（${c.days_to_next_pay} 天后）`));
+  if (c.next_repay_date) keyNumbers.appendChild(keyNum("下一还款日", c.days_to_repay === 0 ? `今天（${c.next_repay_date}）` : `${c.next_repay_date}（${c.days_to_repay} 天后）`));
   if (c.days_to_end != null) keyNumbers.appendChild(keyNum("到期", dueText(c.days_to_end)));
   if (asset.annual_rate != null) {
     const rateLabels = { fixed_deposit: "年利率", loan_out: "约定年利率", loan_in: "约定年利率", mortgage: "贷款年利率" };
@@ -58,11 +63,12 @@ export async function renderDetail(root, assetId) {
 
   // 基本信息
   const infoGrid = el("div", { class: "dialog-grid" });
+  const institutionLabel = { mortgage: "贷款银行", credit_card: "发卡行" }[asset.category] || "机构/交易对手";
   const infoItems = [
     ["分类", CATEGORY_MAP[asset.category]?.name || asset.category],
     ["方向", asset.direction === "asset" ? "资产" : "负债"],
     ["归属人", asset.holder_name],
-    ["机构/交易对手", asset.institution || "—"],
+    [institutionLabel, asset.institution || "—"],
     ["开始日期", asset.start_date || "—"],
     ["到期日", asset.end_date || "—"],
     ["备注", asset.note || "—"],

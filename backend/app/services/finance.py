@@ -108,6 +108,16 @@ def _cents(amount: float) -> int:
     return int(round(amount))
 
 
+def _next_month_day(day: int) -> tuple[date, int]:
+    """下一个「每月 day 日」：返回 (日期, 距今天数)。day 限 1~28，无月末溢出。"""
+    t = _today()
+    candidate = date(t.year, t.month, day)
+    if candidate < t:  # 本月已过 → 下月同日
+        year, month = (t.year + 1, 1) if t.month == 12 else (t.year, t.month + 1)
+        candidate = date(year, month, day)
+    return candidate, (candidate - t).days
+
+
 def _validate_extra(category: str, extra: dict, errors: list) -> None:
     for key, rule in _EXTRA_RULES.get(category, {}).items():
         if key not in extra:
@@ -324,10 +334,27 @@ def compute(conn: sqlite3.Connection, asset: dict) -> dict:
         remaining = max(asset["amount_cents"] - repaid, 0)
         result.update(repaid_cents=repaid, remaining_cents=remaining, can_settle=remaining == 0)
 
-    if category == "mortgage" and extra.get("monthly_payment_cents"):
-        monthly = int(extra["monthly_payment_cents"])
-        if monthly > 0:
-            result.update(remaining_months=_cents(asset["amount_cents"] / monthly))
+    # 房贷增强（M3b · design §4.3）：剩余期数 / 预计结清月 / 已还本金 / 下次扣款日
+    if category == "mortgage":
+        monthly = int(extra.get("monthly_payment_cents") or 0)
+        principal = asset["amount_cents"]  # 金额字段语义 = 剩余本金（requirements FR-02）
+        if monthly > 0 and principal > 0:
+            months = (principal + monthly - 1) // monthly  # ceil
+            t = _today()
+            idx = t.year * 12 + t.month - 1 + months
+            result.update(remaining_months=months,
+                          payoff_month=f"{idx // 12}-{idx % 12 + 1:02d}")
+        total = int(extra.get("total_cents") or 0)
+        if total > principal:
+            result["paid_principal_cents"] = total - principal
+        if extra.get("pay_day"):
+            next_pay, days = _next_month_day(int(extra["pay_day"]))
+            result.update(next_pay_date=next_pay.isoformat(), days_to_next_pay=days)
+
+    # 信用卡增强（M3b · design §4.3）：下一还款日 / 距还款日天数
+    if category == "credit_card" and extra.get("repay_day"):
+        next_repay, days = _next_month_day(int(extra["repay_day"]))
+        result.update(next_repay_date=next_repay.isoformat(), days_to_repay=days)
     return result
 
 

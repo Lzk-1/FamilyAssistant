@@ -5,7 +5,7 @@
 import { apiGet } from "../../api.js";
 import { el, btn, input, select, tag, emptyState, toast } from "../../ui.js";
 import { icon } from "../../icons.js";
-import { fmtMoney, statusVariant, statusRowClass, dueText, STATUS_LABELS, CATEGORY_MAP, categoryColor, fetchMembers, toggleCompare, addManyToCompare, getCompareIds } from "./common.js";
+import { fmtMoney, statusVariant, statusRowClass, dueText, fmtMonth, STATUS_LABELS, CATEGORY_MAP, categoryColor, fetchMembers, toggleCompare, addManyToCompare, getCompareIds } from "./common.js";
 import { openAssetDialog } from "./dialog.js";
 import { openMembersDialog } from "./members.js";
 import { openExportDialog, openImportDialog } from "./io.js";
@@ -239,7 +239,14 @@ export async function renderLedger(root, query) {
           return fmtMoney(amt);
         }},
         { label: "状态", key: "status", render: (row) => tag(STATUS_LABELS[row.effective_status] || row.effective_status, statusVariant(row.effective_status)) },
-        { label: "到期", key: "end_date", render: (row) => row.end_date ? dueText(row.computed?.days_to_end) : "—" },
+        { label: "到期", key: "end_date", render: (row) => {
+          if (row.end_date) return dueText(row.computed?.days_to_end);
+          // 负债无到期日的兜底（M3b 增强）：房贷显示预计结清月、信用卡显示距还款日
+          const c = row.computed || {};
+          if (row.category === "mortgage" && c.payoff_month) return `预计结清 ${fmtMonth(c.payoff_month)}`;
+          if (row.category === "credit_card" && c.next_repay_date) return c.days_to_repay === 0 ? "今天还款" : `${c.days_to_repay} 天后还款`;
+          return "—";
+        } },
         { label: "", key: "_actions", render: (row) => el("span", { class: "row-actions" }, [
           row.direction === "asset"
             ? btn(getCompareIds().includes(row.id) ? "已对比" : "对比", {
