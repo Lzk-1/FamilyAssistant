@@ -18,6 +18,8 @@ export function el(tag, attrs = {}, children = []) {
   for (const [key, value] of Object.entries(attrs)) {
     if (key === "class") node.className = value;
     else if (key === "text") node.textContent = value;
+    else if (key === "onClick" && typeof value === "function") node.addEventListener("click", value);
+    else if (key === "style" && typeof value === "string") node.style.cssText = value;
     else if (value != null) node.setAttribute(key, value);
   }
   for (const child of [].concat(children)) {
@@ -93,4 +95,159 @@ export function emptyState(title, desc) {
 
 export function errorBanner(message) {
   return el("div", { class: "banner error", text: message });
+}
+
+// ============================================================
+// M2 组件（规范第 4 章）
+// ============================================================
+
+/** 按钮（规范 4.1）：variant = primary/secondary/danger/ghost；size = sm/md */
+export function btn(label, { variant = "primary", size, icon: iconName, onClick } = {}) {
+  const cls = `fa-btn fa-btn--${variant}${size === "sm" ? " fa-btn--sm" : ""}`;
+  const node = el("button", { class: cls }, [
+    iconName ? icon(iconName, size === "sm" ? 14 : 16) : null,
+    label ? label : null,
+  ]);
+  if (onClick) node.addEventListener("click", onClick);
+  return node;
+}
+
+/** 图标按钮（行内轻量操作） */
+export function iconBtn(iconName, { variant = "ghost", size, title, onClick } = {}) {
+  const cls = `fa-btn fa-btn--${variant} fa-btn--icon${size === "sm" ? " fa-btn--sm" : ""}`;
+  const node = el("button", { class: cls, title: title || "" }, [icon(iconName, size === "sm" ? 14 : 16)]);
+  if (onClick) node.addEventListener("click", onClick);
+  return node;
+}
+
+/** 文本输入框 */
+export function input({ type = "text", name, value, placeholder, onInput } = {}) {
+  const node = el("input", { type, class: "fa-input" });
+  if (name) node.name = name;
+  if (value != null) node.value = value;
+  if (placeholder) node.placeholder = placeholder;
+  if (onInput) node.addEventListener("input", onInput);
+  return node;
+}
+
+/** 下拉选择框 */
+export function select(name, options, { value, onChange } = {}) {
+  const node = el("select", { class: "fa-input" });
+  if (name) node.name = name;
+  for (const opt of options) {
+    const o = el("option", { value: opt.value, text: opt.label });
+    if (opt.value === value) o.selected = true;
+    if (opt.disabled) o.disabled = true;
+    node.appendChild(o);
+  }
+  if (onChange) node.addEventListener("change", () => onChange(node.value));
+  return node;
+}
+
+/** 多行文本框 */
+export function textarea({ name, value, placeholder, rows = 3, onInput } = {}) {
+  const node = el("textarea", { class: "fa-input", rows: String(rows) });
+  if (name) node.name = name;
+  if (value != null) node.value = value;
+  if (placeholder) node.placeholder = placeholder;
+  if (onInput) node.addEventListener("input", onInput);
+  return node;
+}
+
+/** 表单字段：label + 控件 + 错误提示 */
+export function field(label, control, { error, required } = {}) {
+  const children = [
+    el("label", { class: "fa-field__label", text: required ? `${label} *` : label }),
+    el("div", { class: "fa-field__control" }, [control]),
+  ];
+  if (error) children.push(el("p", { class: "fa-field__error", text: error }));
+  return el("div", { class: "fa-field" }, children);
+}
+
+/** 统计卡片：左侧色条 + 标签 + 数值 + 可选子文本 */
+export function statCard({ label, value, sub, accent } = {}) {
+  const style = accent ? `--stat-accent: ${accent}` : "";
+  return el("div", { class: "fa-stat", style }, [
+    el("div", { class: "fa-stat__bar" }),
+    el("div", { class: "fa-stat__body" }, [
+      el("div", { class: "fa-stat__label", text: label }),
+      el("div", { class: "fa-stat__value", text: value }),
+      sub ? el("div", { class: "fa-stat__sub", text: sub }) : null,
+    ]),
+  ]);
+}
+
+/** Tab 栏：tabs=[{key,label}]；activeKey 当前选中；onChange 切换回调 */
+export function tabs(tabs, activeKey, onChange) {
+  const nav = el("div", { class: "fa-tabs" },
+    tabs.map((t) =>
+      el("a", {
+        class: `fa-tabs__item${t.key === activeKey ? " active" : ""}`,
+        text: t.label,
+        href: "javascript:void(0)",
+        onClick: () => onChange && onChange(t.key),
+      })
+    )
+  );
+  return nav;
+}
+
+/** 模态弹窗（规范 4.3）：返回 {el, close}；width = normal/wide/narrow */
+export function modal({ title, body, footer, width = "normal", onClose, danger } = {}) {
+  const overlay = el("div", { class: `fa-modal__overlay${danger ? " fa-modal__overlay--danger" : ""}` });
+  const dialog = el("div", { class: `fa-modal fa-modal--${width}` }, [
+    el("div", { class: "fa-modal__header" }, [
+      el("h3", { text: title }),
+      iconBtn("close", { variant: "ghost", size: "sm", title: "关闭", onClick: () => close() }),
+    ]),
+    el("div", { class: "fa-modal__body" }, [body]),
+    footer ? el("div", { class: "fa-modal__footer" }, [footer]) : null,
+  ]);
+  overlay.appendChild(dialog);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  function close() {
+    overlay.remove();
+    if (onClose) onClose();
+  }
+  document.body.appendChild(overlay);
+  return { el: dialog, close };
+}
+
+/** Toast 通知（规范 4.7）：type = ok/warn/err/info；2.5s 自动消失 */
+export function toast(message, type = "info") {
+  const t = el("div", { class: `fa-toast fa-toast--${type}` }, [
+    icon(type === "ok" ? "check" : type === "err" ? "alert" : "alert", 16),
+    el("span", { text: message }),
+  ]);
+  const container = document.querySelector(".fa-toast-container") || (() => {
+    const c = el("div", { class: "fa-toast-container" });
+    document.body.appendChild(c);
+    return c;
+  })();
+  container.appendChild(t);
+  setTimeout(() => {
+    t.classList.add("fa-toast--out");
+    setTimeout(() => t.remove(), 300);
+  }, 2500);
+  return t;
+}
+
+/** 确认弹窗：返回 Promise<boolean> */
+export function confirmModal({ title, message, confirmLabel = "确认", danger } = {}) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const m = modal({
+      title,
+      width: "narrow",
+      danger,
+      body: el("p", { text: message, style: "line-height:1.6" }),
+      footer: el("div", { class: "fa-modal__footer" }, [
+        btn("取消", { variant: "secondary", onClick: () => { if (!resolved) { resolved = true; resolve(false); m.close(); } } }),
+        btn(confirmLabel, { variant: danger ? "danger" : "primary", onClick: () => { if (!resolved) { resolved = true; resolve(true); m.close(); } } }),
+      ]),
+    });
+  });
 }

@@ -28,6 +28,9 @@ docker compose up -d          # 数据持久化于宿主机 ./data
 
 - [整体框架方案设计文档](docs/architecture.md) —— 架构、模块设计、数据库、部署形态与路线图
 - [整体 UI 设计规范](docs/ui-design.md) —— 设计系统（令牌/组件）与五模块页面布局、交互流程
+- [理财模块方案与 UI 设计](docs/finance-module-design.md) —— 业界调研、资产分类与字段、页面设计（已确认）
+- [理财模块开发方案](docs/finance-dev-plan.md) —— 数据库迁移、API/服务层/前端实现、测试与实施步骤
+- [理财模块需求开发文档](docs/finance-requirements.md) —— 功能需求 FR、验收标准、数据字典与边界场景
 
 ## 目录概览
 

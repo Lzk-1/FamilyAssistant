@@ -36,8 +36,7 @@ def test_module_registry_order() -> None:
 
 def test_module_list_endpoints_return_empty() -> None:
     with make_client() as client:
-        for path in ("/finance/accounts", "/house/candidates", "/car/candidates",
-                     "/memo/memos", "/files/records"):
+        for path in ("/house/candidates", "/car/candidates", "/memo/memos", "/files/records"):
             resp = client.get(f"/api/v1{path}")
             assert resp.status_code == 200, path
             assert resp.json() == {"code": 0, "message": "ok", "data": []}

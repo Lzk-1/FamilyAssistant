@@ -28,7 +28,8 @@ function buildNav() {
 }
 
 function currentKey() {
-  const key = location.hash.replace("#/", "");
+  // 支持模块子路由：#/finance/assets/3?x=1 → finance
+  const key = location.hash.replace(/^#\//, "").split(/[/?]/)[0];
   for (const a of nav.querySelectorAll("a")) {
     a.classList.toggle("active", a.dataset.key === key);
   }
