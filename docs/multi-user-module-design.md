@@ -2,10 +2,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 版本 | v1.1（已按本设计实施交付，决策点见 §9） |
+| 版本 | v1.2（已按本设计实施交付，决策点见 §9） |
 | 日期 | 2026-10-16 |
 | 上游输入 | [architecture.md](architecture.md) §1.1「预留多团队协作」、[ui-design.md](ui-design.md) 全局规范、[house-module-design.md](house-module-design.md) 模块设计模式 |
-| 状态 | **已交付（v0.9.0）**：005 迁移 + 认证服务 + 前端登录/成员管理全链路完成，pytest 64/64 通过，auth_enabled=true/false 双模式实测通过 |
+| 状态 | **已交付（v0.9.0 起，v0.9.2 增量）**：005/006 迁移 + 认证服务 + 头像/个人中心 + 前端登录/成员管理全链路完成，pytest 72/72 通过，auth_enabled=true/false 双模式实测通过 |
 
 ---
 
@@ -143,11 +143,11 @@ def get_current_user(request, settings, conn=Depends(get_db)) -> dict:
 
 ### 3.5 首登强制改密（D4）
 
-登录响应携带 `must_change_password=true` → 前端渲染**不可跳过的全屏改密表单**（无导航、无退出旁路）→ `PUT /auth/password` 完成后清除标记并释放应用。改密成功同时吊销该用户其他全部会话（除当前）。
+登录响应携带 `must_change_password=true` → 前端渲染**不可跳过的全屏改密表单**（无导航、无退出旁路；仅新密码 + 确认两框）→ `PUT /auth/password` 完成后清除标记并释放应用。改密成功同时吊销该用户其他全部会话（除当前）。**强制改密态不校验旧密码**（能进入该视图即已通过登录验证，Keycloak/Gitea 同款）；改密成功后前端不得复用登录响应的旧快照（`must_change_password` 仍为 true，会导致改密视图二次渲染，即用户感知的"要重置两次密码"）。
 
 ### 3.6 改密与重置
 
-- `PUT /auth/password`（本人）：校验 old_password → 新哈希（600k）→ 清 must_change_password → 吊销其他会话
+- `PUT /auth/password`（本人）：常规自助改密**校验 old_password**；`must_change_password=1`（首登/被管理员重置）时跳过旧密校验 → 新哈希（600k）→ 清标记 → 吊销其他会话
 - `PUT /auth/users/{id}/password`（admin 重置成员）：不校验旧密 → 置 must_change_password=1 → 吊销该成员全部会话（强制重新登录）
 - 密码强度：最小 8 位 + 不得等于用户名（轻量校验，家庭场景不做复杂度策略引擎）
 
@@ -161,8 +161,10 @@ def get_current_user(request, settings, conn=Depends(get_db)) -> dict:
 
 | 角色 | 能力 |
 | --- | --- |
-| admin | 全部业务读写 + 成员管理（建号/改角色/禁用/重置密码）+ 改密 + 登出 |
-| member | 全部业务读写 + 本人改密 + 登出 |
+| admin | 全部业务读写 + 理财模块全部写操作 + 成员管理（建号/改角色/禁用/重置密码）+ 改密 + 登出 |
+| member | 业务**只读为主**：理财模块读可见、写一律 403（M4.1，详见 §4.2）；其余业务模块（选房/选车/备忘录/文件存档）仍全员读写；本人改密 + 登出 |
+
+> 成员要记账时由管理员将其角色改为 admin；细粒度权限（如"可写理财但不可删成员"）按 YAGNI 不做。
 
 三条铁律（服务层校验，API 层无 DELETE 成员接口）：
 
@@ -179,7 +181,11 @@ def require_admin(user=Depends(get_current_user)) -> dict:
     return user
 ```
 
-仅挂在成员管理路由上；业务路由维持 get_current_user（全员读写）。
+挂载范围：
+
+- **成员管理路由**（`/auth/users*` 全部写接口）
+- **理财模块全部写接口（M4.1，v0.9.2）**：资产 CRUD / 批量删除 / 状态流转 / 市值记录增删 / 收益录入 / 附件上传删除 / 备份导入 / 成员字典维护——共 14 个端点；只靠前端隐藏按钮是表面功夫，后端强制是安全底线
+- 其余业务路由维持 get_current_user（全员读写）
 
 ### 4.3 数据归属语义（D1：全家庭共享）
 
@@ -208,13 +214,22 @@ def require_admin(user=Depends(get_current_user)) -> dict:
 
 不可跳过（无导航无退出）：新密码 + 确认新密码 + 提交，走 `PUT /auth/password`；完成 toast 后进应用。
 
-### 5.3 用户菜单（侧边栏 sidebar-footer 扩展）
+### 5.3 用户菜单（侧边栏 sidebar-footer，v0.9.2 更新）
 
-侧边栏底部健康状态旁新增用户块：显示名 + 菜单按钮，弹菜单项：
+侧边栏底部用户块：**圆形头像 + 显示名 + 下拉箭头**，点击弹浮层菜单：
 
-- **修改密码**（弹窗：旧密/新密/确认，`.fa-dialog-actions` 规范）
+- **个人中心**（弹窗：头像上传/移除、显示名修改、修改密码）
 - **成员管理**（仅 admin 可见，跳 `#/members`）
 - **退出登录**（POST /auth/logout → 回登录视图）
+
+侧边栏不再展示服务健康状态圆点（`/system/health` 探活仅保留 API，前端不渲染）。
+
+**头像（v0.9.2 新增，006 迁移）**：
+
+- 默认头像 = 显示名首字 + 按用户名哈希的确定性配色（同一人跨设备颜色一致，零图片零依赖）
+- 上传：仅本人（个人中心内），JPG/PNG/WebP、≤2MB、扩展名 + 魔数双校验，替换式上传自动删旧文件；可移除恢复默认
+- 存储：文件落盘 `data/uploads/avatars/{id}/{uuid}.ext`，DB 只存相对路径（可随 data/ 整目录备份）；成员表格新增只读头像列
+- `session.js`：全局共享登录态模块（app.js 写入、页面层只读，避免循环依赖）；`isAdmin()` 对 null user（单机旁路）返回 true
 
 免登录模式：GET /auth/me 返回内置 admin → 用户块显示「管理员 · 单机模式」，菜单仅展示改密项？——**不展示**（免登录模式改密无意义，登录关闭时密码不参与认证），用户块整体隐藏。
 
@@ -242,7 +257,11 @@ def require_admin(user=Depends(get_current_user)) -> dict:
 | GET | /auth/me | 当前用户信息（含 must_change_password）；免登录模式返回内置 admin + `single_user_mode: true` | 会话/旁路 |
 | POST | /auth/login | 登录：校验 → 透明哈希升级 → 签发 → Set-Cookie；返回 {user, must_change_password} | 公开（CSRF 豁免） |
 | POST | /auth/logout | 登出：删除当前会话行 + 清 cookie | 会话 |
-| PUT | /auth/password | 本人改密（old/new）：吊销其他会话、清强制改密标记 | 会话 |
+| PUT | /auth/password | 本人改密（old/new；must_change_password=1 时免 old）→ 吊销其他会话、清强制改密标记 | 会话 |
+| PUT | /auth/profile | 更新本人显示名（个人中心） | 会话 |
+| POST | /auth/avatar | 上传本人头像（≤2MB，扩展名+魔数校验，替换式） | 会话 |
+| DELETE | /auth/avatar | 移除本人头像（恢复默认字母头像） | 会话 |
+| GET | /auth/users/{id}/avatar | 读取成员头像（成员表格/侧边栏头像源） | 会话 |
 | GET | /auth/users | 成员列表（computed：active_sessions / recent_active_at） | admin |
 | POST | /auth/users | 新建成员（username 唯一、密码强度校验、role 白名单） | admin |
 | PUT | /auth/users/{id} | 更新成员（display_name / role / is_active；三条铁律服务层校验） | admin |
@@ -260,7 +279,7 @@ def require_admin(user=Depends(get_current_user)) -> dict:
 | 服务层四个文件 | `_DEFAULT_USER_ID` 退位为形参 user_id + 读查询去过滤 | 接口签名变化仅 API 层调用，无跨 service 依赖 |
 | finance 备份导入 | import_backup 已有 default_user_id 兜底逻辑（跨机恢复场景） | 语义不变：导入数据统一落当前用户 |
 | memos/files 等查询 | user_id 过滤移除 | 免登录模式数据只增不减 |
-| 前端模块页 | 业务页零改动（全员可读写，无按钮级权限渲染） | 成员管理页为唯一新增页面 |
+| 前端模块页 | 理财页面按 `isAdmin()` 条件渲染写入口（M4.1）；其余业务页零改动 | `session.js` 共享登录态，页面层不反向依赖 app.js |
 | 复用组件 | modal/toast/confirmModal/tag/select/errorBanner + `.fa-dialog-actions` 按钮规范 | 全部沿用 ui.js 既有组件 |
 
 ## 8. 实施切分
@@ -269,7 +288,9 @@ def require_admin(user=Depends(get_current_user)) -> dict:
 | --- | --- | --- |
 | **M-auth1** | 后端：005 迁移、security.py 格式升级（600k 四段式+透明升级）、auth service（会话签发/校验/续期/吊销 + 成员管理铁律）、auth API、deps.py 实装 + CSRF 校验、服务层 user_id 审计改造、test_auth.py + 全量回归 | ✅ |
 | **M-auth2** | 前端：登录视图、强制改密视图、用户菜单、成员管理页、api.js 401/头改造 | ✅ |
-| **验证** | auth_enabled=true 浏览器全链路实测（登录/改密/多成员协作/铁律/会话过期）+ auth_enabled=false 回归 + 文档更新（architecture.md §9 环境变量表 + 路线图）+ 版本升级 0.8.0 → 0.9.0 | ✅（实测补充：admin 建号初始密码同样置 must_change_password=1，新增回归测试覆盖） |
+| **M-auth3** | v0.9.2：006 迁移（avatar_path 列）+ 头像上传/移除/读取 + 个人中心（改显示名/改密）+ `session.js` 共享登录态；强制改密态免旧密校验（修复"两次改密"体感） | ✅ |
+| **M4.1** | v0.9.2：理财权限模型（写接口 require_admin，14 端点）+ 台账批量删除 + 市值记录删除 + 行尾单行删除 + 统一勾选模型 | ✅ |
+| **验证** | auth_enabled=true 浏览器全链路实测（登录/改密/多成员协作/铁律/会话过期/头像/个人中心/双角色理财读写矩阵）+ auth_enabled=false 回归 + 文档更新 + 版本 0.8.0 → 0.9.0 → 0.9.2 | ✅ |
 
 ## 9. 决策点
 

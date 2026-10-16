@@ -192,7 +192,7 @@ status = holding 且有 end_date：
 
 统一响应包与错误码沿用 core 规范。所有写接口在多用户前（M0 模式）绑定当前 `user_id`。
 
-### 4.1 端点总表
+### 4.1 端点总表（权限：读全员可用，写仅 admin——M4.1，v0.9.2）
 
 | 方法 | 路径 | 说明 | 需求 |
 | --- | --- | --- | --- |
@@ -208,6 +208,8 @@ status = holding 且有 end_date：
 | POST | `/finance/assets/{id}/settle` | 状态流转 `{action: withdraw\|renew\|repay\|clear, amount_cents?, date?, note?}`；repay 追加还款记录 | FR-09 |
 | GET | `/finance/assets/{id}/values` | 市值历史 | FR-10 |
 | POST | `/finance/assets/{id}/values` | 手动记录市值 `{value_cents, value_date, note?}`（同时写 events） | FR-10 |
+| DELETE | `/finance/assets/{id}/values/{vid}` | 删除市值记录（v0.9.2；删最新一条自动回退当前金额，events 留痕） | FR-10 |
+| POST | `/finance/assets/batch-delete` | 批量软删除 `{ids: [1..100]}`（v0.9.2；返回 `{deleted, missing}`，逐条 events 留痕） | FR-03 |
 | POST | `/finance/assets/{id}/attachments` | 上传附件（multipart/form-data） | FR-05 |
 | GET | `/finance/attachments/{id}/download` | 下载（二进制流，`Content-Disposition`） | FR-05 |
 | DELETE | `/finance/attachments/{id}` | 删除附件（文件+记录） | FR-05 |
