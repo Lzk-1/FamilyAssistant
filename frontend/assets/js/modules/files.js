@@ -3,7 +3,6 @@
 import { apiGet } from "../api.js";
 import { pageHeader, placeholderCard, card, table } from "../ui.js";
 
-const MILESTONE = "M1";
 const FEATURES = "拖拽上传 · 分类归档 · 下载预览 · 容量统计";
 
 function formatSize(bytes) {
@@ -14,7 +13,7 @@ function formatSize(bytes) {
 }
 
 export async function render(root, mod) {
-  root.appendChild(pageHeader(mod, MILESTONE));
+  root.appendChild(pageHeader(mod));
   const records = await apiGet("/files/records");
   root.appendChild(
     records.length

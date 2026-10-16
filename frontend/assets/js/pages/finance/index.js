@@ -46,7 +46,7 @@ function tabKey(section) {
 
 export async function render(root, mod) {
   // 页头
-  root.appendChild(pageHeader(mod, "M2"));
+  root.appendChild(pageHeader(mod));
 
   const route = parseRoute();
 

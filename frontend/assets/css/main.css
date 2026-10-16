@@ -128,11 +128,8 @@ body {
   display: flex; align-items: center; gap: 8px;
   font-size: 12px; color: var(--text-faint); padding: 0 8px;
 }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
-.dot.ok { background: var(--ok); }
-.dot.err { background: var(--err); }
 
-/* ---------- 5. 页头（模块徽标 + 标题 + 里程碑标签） ---------- */
+/* ---------- 5. 页头（模块徽标 + 标题） ---------- */
 .page-header {
   display: flex; justify-content: space-between; align-items: flex-start;
   margin-bottom: var(--sp-5);
@@ -317,6 +314,8 @@ textarea.fa-input { height: auto; padding: 8px 12px; line-height: 1.5; resize: v
 .fa-dialog-actions--auto .fa-btn {
   flex: 0 1 auto; min-width: 96px; max-width: none;
 }
+/* 动作条内左部分组（如个人中心的「修改密码」与右侧保存按钮分隔） */
+.fa-dialog-actions .fa-dialog-spacer { margin-right: auto; }
 
 /* Toast 通知 */
 .fa-toast-container {
@@ -407,6 +406,8 @@ textarea.fa-input { height: auto; padding: 8px 12px; line-height: 1.5; resize: v
 .row--soon { background: var(--soon-soft); }
 .row--matured { background: var(--matured-soft); }
 .row--overdue { background: var(--err-soft); }
+/* 批量删除模式下已勾选的行（置后覆盖状态行配色） */
+.asset-row--selected, .asset-row--selected:hover { background: var(--m-finance-soft); box-shadow: inset 3px 0 0 var(--m-finance); }
 .row--urgent:hover { background: rgba(234,88,12,0.08); }
 .row--soon:hover { background: rgba(202,138,4,0.08); }
 
@@ -480,7 +481,8 @@ textarea.fa-input { height: auto; padding: 8px 12px; line-height: 1.5; resize: v
 /* ---------- 7.x 对比分析（M2c · compare-design §6.2） ---------- */
 .compare-check { width: 15px; height: 15px; accent-color: var(--m-finance); cursor: pointer; }
 .compare-check:disabled { cursor: not-allowed; opacity: .4; }
-.row-actions { display: inline-flex; gap: 4px; }
+.row-actions { display: inline-flex; gap: 4px; justify-content: flex-end; }
+.asset-row .row-actions .fa-btn--icon:last-child:hover { color: var(--err); background: var(--err-soft); }
 
 .compare-basket { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .compare-basket__item { display: flex; align-items: center; gap: 10px; background: var(--m-finance-soft);
@@ -570,6 +572,169 @@ textarea.fa-input { height: auto; padding: 8px 12px; line-height: 1.5; resize: v
 .fa-lightbox__nav { top: 50%; transform: translateY(-50%); width: 42px; height: 42px; }
 .fa-lightbox__nav--prev { left: 20px; }
 .fa-lightbox__nav--next { right: 20px; }
+
+/* ---------- 7.5 M4 认证：登录页 + 侧边栏用户块 ---------- */
+/* 登录模式（未登录 / 强制改密）：隐藏侧边导航，内容区全宽 */
+body.login-mode .layout { grid-template-columns: 1fr; }
+body.login-mode .sidebar { display: none; }
+body.login-mode .view { max-width: none; padding: 0; }
+
+/* 整屏登录舞台：深色渐变底 + 两团品牌色光晕（纯 CSS，零图片零依赖） */
+.login-shell {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  padding: 32px 20px;
+  overflow: hidden;
+  background: linear-gradient(150deg, #1e293b 0%, #1f2937 46%, #172554 100%);
+}
+.login-glow {
+  position: absolute; border-radius: 50%;
+  filter: blur(90px); pointer-events: none;
+}
+.login-glow--a { width: 460px; height: 460px; top: -150px; right: -110px;
+  background: #3b82f6; opacity: 0.35; }
+.login-glow--b { width: 420px; height: 420px; bottom: -170px; left: -130px;
+  background: #0ea5e9; opacity: 0.22; }
+
+/* 登录 / 强制改密卡片：margin:auto 居中——空间足够时居中，
+   小窗口超高时从顶部排列，避免卡片顶部被裁切 */
+.login-card {
+  position: relative;
+  margin: auto;
+  width: 100%;
+  max-width: 420px;
+  padding: 34px 40px 26px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 20px;
+  box-shadow: 0 24px 70px rgba(2, 16, 38, 0.45);
+  animation: loginRise 0.35s ease;
+}
+@keyframes loginRise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 品牌区 */
+.login-brand {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 9px; text-align: center; margin-bottom: 20px;
+}
+.login-brand__logo {
+  width: 56px; height: 56px; border-radius: 16px;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
+}
+.login-brand h1 { font-size: 24px; font-weight: 700; letter-spacing: 0.5px; color: var(--text); }
+.login-brand p { font-size: 13px; color: var(--text-muted); }
+
+/* 卡片标题区：图标徽标 + 眉题 + 主标题，顶部分隔线 */
+.login-card__head {
+  display: flex; align-items: center; gap: 12px;
+  padding-top: 18px; margin-bottom: 18px;
+  border-top: 1px solid var(--border);
+}
+.login-card__headicon {
+  width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--primary-soft); color: var(--primary);
+}
+.login-card__eyebrow { font-size: 12px; color: var(--text-faint); margin-bottom: 2px; }
+.login-card__head h2 { font-size: 18px; font-weight: 600; color: var(--text); }
+
+/* 强制改密提示条 */
+.login-notice {
+  background: var(--primary-soft); color: #1e40af;
+  border-radius: var(--radius-s); padding: 10px 14px;
+  font-size: 13px; line-height: 1.6; margin-bottom: 18px;
+}
+.login-notice strong { font-weight: 600; }
+
+/* 带前置图标的输入框 */
+.login-input { position: relative; display: flex; align-items: center; }
+.login-input__icon {
+  position: absolute; left: 12px; display: flex;
+  color: var(--text-faint); pointer-events: none;
+  transition: color 0.15s;
+}
+.login-input .fa-input { height: 42px; padding-left: 40px; }
+.login-input:focus-within .login-input__icon { color: var(--primary); }
+
+/* 登录主按钮 */
+.login-submit { width: 100%; height: 42px; justify-content: center; font-size: 15px; margin-top: 2px; }
+
+/* 错误行（空容器不占位） */
+.login-error:not(:empty) { margin-bottom: 12px; }
+.login-error .banner { margin-bottom: 0; }
+
+@media (max-width: 480px) {
+  .login-shell { padding: 20px 14px; }
+  .login-card { padding: 32px 24px 26px; border-radius: 16px; }
+}
+
+/* 侧边栏底部用户块：独占一行，深色底适配；头像 + 显示名（不显示角色） */
+.sidebar-footer { flex-wrap: wrap; row-gap: 10px; }
+#user-block {
+  flex: 1 1 100%;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px;
+  color: var(--sidebar-text);
+  overflow: hidden; text-align: left;
+}
+#user-block:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+#user-block__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#user-block__caret { color: var(--text-faint); display: flex; flex-shrink: 0; }
+
+/* 圆形头像 */
+.fa-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; color: #fff; font-weight: 600;
+  flex-shrink: 0; overflow: hidden; user-select: none;
+}
+.fa-avatar__img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+
+/* 用户菜单浮层 */
+.fa-popover {
+  position: fixed; z-index: 1100;
+  min-width: 208px; padding: 6px;
+  background: #fff; border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 12px 36px rgba(2, 16, 38, 0.18);
+  animation: loginRise 0.12s ease;
+}
+.fa-popover__item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 9px 10px;
+  border: none; border-radius: 8px;
+  background: transparent; color: var(--text);
+  font-size: 14px; font-family: inherit; text-align: left;
+  cursor: pointer; transition: background 0.12s;
+}
+.fa-popover__item:hover { background: var(--bg); }
+.fa-popover__item svg { color: var(--text-muted); flex-shrink: 0; }
+.fa-popover__item--danger { color: var(--err); }
+.fa-popover__item--danger svg { color: var(--err); }
+.fa-popover__item--danger:hover { background: var(--err-soft); }
+.fa-popover__divider { height: 1px; background: var(--border); margin: 5px 6px; }
+.fa-popover__hint { padding: 8px 10px 4px; font-size: 12px; color: var(--text-faint); }
+
+/* 成员管理表格：头像 + 显示名单元格 */
+.member-cell { display: flex; align-items: center; gap: 10px; }
+.member-cell__name { font-weight: 500; color: var(--text); white-space: nowrap; }
+
+/* 个人中心头像编辑 */
+.avatar-editor { display: flex; align-items: center; gap: 18px; margin-bottom: 4px; }
+.avatar-editor__meta { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.avatar-editor__hint { font-size: 12px; color: var(--text-faint); }
+
+/* 无障碍：视觉隐藏但保留可聚焦/可被辅助技术识别（照片/头像文件输入） */
+.fa-sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* ---------- 8. 响应式 ---------- */
 @media (max-width: 768px) {

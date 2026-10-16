@@ -13,7 +13,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 
-from app.api.deps import get_current_user, get_db, get_settings
+from app.api.deps import get_db, get_settings, require_admin
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.responses import ok
@@ -22,6 +22,10 @@ from app.services import finance_io
 from app.services.finance import MAX_FILE_SIZE
 
 router = APIRouter()
+
+# 理财模块权限模型（M4.1）：读接口全体成员可用；写接口（增删改/流转/附件/导入/
+# 字典维护）仅 admin。require_admin 内部已依赖 get_current_user，并返回 user 供审计字段使用。
+admin_write = [Depends(require_admin)]
 
 # 附件下载的媒体类型映射（file_type 已过服务端白名单）
 _MEDIA_TYPES = {
@@ -42,12 +46,12 @@ def list_members(conn=Depends(get_db)) -> dict:
     return ok(finance_service.list_members(conn))
 
 
-@router.post("/members", dependencies=[Depends(get_current_user)])
+@router.post("/members", dependencies=admin_write)
 def create_member(payload: dict, conn=Depends(get_db)) -> dict:
     return ok(finance_service.create_member(conn, payload))
 
 
-@router.put("/members/{member_id}", dependencies=[Depends(get_current_user)])
+@router.put("/members/{member_id}", dependencies=admin_write)
 def update_member(member_id: int, payload: dict, conn=Depends(get_db)) -> dict:
     return ok(finance_service.update_member(conn, member_id, payload))
 
@@ -69,8 +73,8 @@ def list_assets(
     }))
 
 
-@router.post("/assets")
-def create_asset(payload: dict, conn=Depends(get_db), user=Depends(get_current_user)) -> dict:
+@router.post("/assets", dependencies=admin_write)
+def create_asset(payload: dict, conn=Depends(get_db), user=Depends(require_admin)) -> dict:
     asset_id = finance_service.create_asset(conn, payload, user["id"])
     return ok(finance_service.get_asset(conn, asset_id))
 
@@ -91,24 +95,31 @@ def get_asset(asset_id: int, conn=Depends(get_db)) -> dict:
     return ok(finance_service.get_asset(conn, asset_id))
 
 
-@router.put("/assets/{asset_id}")
+@router.put("/assets/{asset_id}", dependencies=admin_write)
 def update_asset(asset_id: int, payload: dict, conn=Depends(get_db),
-                 user=Depends(get_current_user)) -> dict:
+                 user=Depends(require_admin)) -> dict:
     finance_service.update_asset(conn, asset_id, payload, user["id"])
     return ok(finance_service.get_asset(conn, asset_id))
 
 
-@router.delete("/assets/{asset_id}")
-def delete_asset(asset_id: int, conn=Depends(get_db), user=Depends(get_current_user)) -> dict:
+@router.delete("/assets/{asset_id}", dependencies=admin_write)
+def delete_asset(asset_id: int, conn=Depends(get_db), user=Depends(require_admin)) -> dict:
     finance_service.soft_delete_asset(conn, asset_id, user["id"])
     return ok({"id": asset_id, "deleted": True})
 
 
+@router.post("/assets/batch-delete", dependencies=admin_write)
+def batch_delete_assets(payload: dict, conn=Depends(get_db),
+                        user=Depends(require_admin)) -> dict:
+    """批量软删除：body {"ids": [1,2,...]}；返回 {deleted, missing}。"""
+    return ok(finance_service.batch_delete_assets(conn, payload.get("ids"), user["id"]))
+
+
 # ============ 状态流转（FR-09） ============
 
-@router.post("/assets/{asset_id}/settle")
+@router.post("/assets/{asset_id}/settle", dependencies=admin_write)
 def settle_asset(asset_id: int, payload: dict, conn=Depends(get_db),
-                 user=Depends(get_current_user)) -> dict:
+                 user=Depends(require_admin)) -> dict:
     action = str(payload.get("action", ""))
     return ok(finance_service.settle_asset(conn, asset_id, action, payload, user["id"]))
 
@@ -120,29 +131,36 @@ def list_values(asset_id: int, conn=Depends(get_db)) -> dict:
     return ok(finance_service.list_values(conn, asset_id))
 
 
-@router.post("/assets/{asset_id}/values")
+@router.post("/assets/{asset_id}/values", dependencies=admin_write)
 def add_value(asset_id: int, payload: dict, conn=Depends(get_db),
-              user=Depends(get_current_user)) -> dict:
+              user=Depends(require_admin)) -> dict:
     return ok(finance_service.add_value(conn, asset_id, payload, user["id"]))
+
+
+@router.delete("/assets/{asset_id}/values/{value_id}", dependencies=admin_write)
+def delete_value(asset_id: int, value_id: int, conn=Depends(get_db),
+                 user=Depends(require_admin)) -> dict:
+    finance_service.delete_value(conn, asset_id, value_id, user["id"])
+    return ok({"id": value_id, "deleted": True})
 
 
 # ============ 实际收益录入（M2d，仅理财产品） ============
 
-@router.post("/assets/{asset_id}/interest")
+@router.post("/assets/{asset_id}/interest", dependencies=admin_write)
 def add_interest(asset_id: int, payload: dict, conn=Depends(get_db),
-                 user=Depends(get_current_user)) -> dict:
+                 user=Depends(require_admin)) -> dict:
     return ok(finance_service.add_interest(conn, asset_id, payload, user["id"]))
 
 
 # ============ 附件（FR-05，dev-plan §5） ============
 
-@router.post("/assets/{asset_id}/attachments")
+@router.post("/assets/{asset_id}/attachments", dependencies=admin_write)
 def upload_attachment(
     asset_id: int,
     upload: UploadFile = File(...),
     conn=Depends(get_db),
     settings: Settings = Depends(get_settings),
-    user=Depends(get_current_user),
+    user=Depends(require_admin),
 ) -> dict:
     # 同步端点与 get_db 同线程，避免 SQLite 跨线程限制；
     # 限量读取（10MB+1），超限内容交由服务层判定拒绝
@@ -167,12 +185,12 @@ def download_attachment(
     )
 
 
-@router.delete("/attachments/{attachment_id}")
+@router.delete("/attachments/{attachment_id}", dependencies=admin_write)
 def delete_attachment(
     attachment_id: int,
     conn=Depends(get_db),
     settings: Settings = Depends(get_settings),
-    user=Depends(get_current_user),
+    user=Depends(require_admin),
 ) -> dict:
     finance_service.delete_attachment(conn, settings.upload_dir, attachment_id, user["id"])
     return ok({"id": attachment_id, "deleted": True})
@@ -230,13 +248,13 @@ def export_backup(
                     headers={"Content-Disposition": f'attachment; filename="finance-backup-{stamp}.json"'})
 
 
-@router.post("/import")
+@router.post("/import", dependencies=admin_write)
 def import_backup(
     upload: UploadFile = File(...),
     mode: str = Form("merge"),
     conn=Depends(get_db),
     settings: Settings = Depends(get_settings),
-    user=Depends(get_current_user),
+    user=Depends(require_admin),
 ) -> dict:
     """导入备份：merge（按主键合并）/ restore（清空后全量恢复，危险操作）。"""
     data = upload.file.read(finance_io.MAX_IMPORT_SIZE + 1)

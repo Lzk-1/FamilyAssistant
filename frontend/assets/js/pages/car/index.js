@@ -29,7 +29,7 @@ export function parseRoute() {
 
 export async function render(root, mod) {
   // 页头
-  root.appendChild(pageHeader(mod, "M3"));
+  root.appendChild(pageHeader(mod));
 
   const route = parseRoute();
 

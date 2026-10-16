@@ -1,12 +1,30 @@
 /** 统一 API 客户端：解包后端统一响应包 {code, message, data}，code !== 0 时抛错。
  * apiUpload 走 XMLHttpRequest：支持上传进度回调（dev-plan §6.2）。
+ *
+ * M4 认证配合（design §5.5）：
+ * - 写方法统一携带 X-Requested-With 头（后端 CSRF 双保险校验）
+ * - 401 通过 setUnauthorizedHandler 钩子交由 app.js 统一处理（渲染登录视图）
  */
 
 const BASE = "/api/v1";
+const CSRF_HEADER = { "X-Requested-With": "XMLHttpRequest" };
+
+let onUnauthorized = null;
+
+/** 注册 401 统一处理（app.js 登录态接管）；登录视图内的失败请求由表单就地展示。 */
+export function setUnauthorizedHandler(fn) {
+  onUnauthorized = fn;
+}
+
+function handleUnauthorized() {
+  if (onUnauthorized) onUnauthorized();
+}
 
 async function request(path, options = {}) {
   const init = { ...options };
-  if (init.body && !init.headers) init.headers = { "Content-Type": "application/json" };
+  init.headers = { ...(init.headers || {}) };
+  if (init.body) init.headers["Content-Type"] = init.headers["Content-Type"] || "application/json";
+  if (init.method && init.method !== "GET") Object.assign(init.headers, CSRF_HEADER);
   const res = await fetch(BASE + path, init);
   let payload = null;
   try {
@@ -19,6 +37,7 @@ async function request(path, options = {}) {
     err.status = res.status;
     err.data = payload && payload.data;
     if (err.data && Array.isArray(err.data.errors)) err.errors = err.data.errors;
+    if (res.status === 401) handleUnauthorized();
     throw err;
   }
   return payload.data;
@@ -41,6 +60,7 @@ export function apiUpload(path, file, { onProgress, field = "upload", fields = {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", BASE + path);
+    xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
     });
@@ -55,8 +75,10 @@ export function apiUpload(path, file, { onProgress, field = "upload", fields = {
         resolve(payload.data);
       } else {
         const err = new Error((payload && payload.message) || `上传失败（HTTP ${xhr.status}）`);
+        err.status = xhr.status;
         err.data = payload && payload.data;
         if (err.data && Array.isArray(err.data.errors)) err.errors = err.data.errors;
+        if (xhr.status === 401) handleUnauthorized();
         reject(err);
       }
     });

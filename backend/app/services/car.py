@@ -16,7 +16,6 @@ from pathlib import Path
 from app.core.database import Database
 from app.core.errors import AppError
 
-_DEFAULT_USER_ID = 1
 MAX_FILE_SIZE = 10 * 1024 * 1024
 _MAX_PHOTOS_PER_CANDIDATE = 24
 _MAX_ITEMS_PER_LIST = 12
@@ -209,14 +208,13 @@ def _decorate(conn: sqlite3.Connection, row: dict) -> dict:
 
 
 def list_candidates(conn: sqlite3.Connection) -> list[dict]:
-    rows = Database.query(conn, "SELECT * FROM car_candidates WHERE user_id = ? ORDER BY id DESC",
-                          (_DEFAULT_USER_ID,))
+    # M4 全家庭共享（design §4.3）：读不过滤 user_id，user_id 仅为创建者审计
+    rows = Database.query(conn, "SELECT * FROM car_candidates ORDER BY id DESC")
     return [_decorate(conn, r) for r in rows]
 
 
 def get_candidate(conn: sqlite3.Connection, candidate_id: int) -> dict:
-    row = _row(conn, "SELECT * FROM car_candidates WHERE id = ? AND user_id = ?",
-               (candidate_id, _DEFAULT_USER_ID))
+    row = _row(conn, "SELECT * FROM car_candidates WHERE id = ?", (candidate_id,))
     if not row:
         raise AppError(4004, "候选车型不存在")
     row = _decorate(conn, row)
@@ -225,7 +223,7 @@ def get_candidate(conn: sqlite3.Connection, candidate_id: int) -> dict:
     return row
 
 
-def create_candidate(conn: sqlite3.Connection, payload: dict) -> dict:
+def create_candidate(conn: sqlite3.Connection, payload: dict, user_id: int) -> dict:
     data, errors = _validate_candidate(payload)
     if errors:
         raise AppError(4001, "车型校验失败", data={"errors": errors})
@@ -234,7 +232,7 @@ def create_candidate(conn: sqlite3.Connection, payload: dict) -> dict:
         "INSERT INTO car_candidates (user_id, brand, model, version, year, energy, mileage, "
         "guide_price_cents, status, score, pros, cons, notes, features) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (_DEFAULT_USER_ID, data["brand"], data["model"], data["version"], data["year"],
+        (user_id, data["brand"], data["model"], data["version"], data["year"],
          data["energy"], data["mileage"], data["guide_price_cents"], data["status"],
          data["score"], data["pros"], data["cons"], data["notes"], _dump_items(data["features"])),
     )
@@ -242,8 +240,7 @@ def create_candidate(conn: sqlite3.Connection, payload: dict) -> dict:
 
 
 def update_candidate(conn: sqlite3.Connection, candidate_id: int, payload: dict) -> dict:
-    original = _row(conn, "SELECT * FROM car_candidates WHERE id = ? AND user_id = ?",
-                    (candidate_id, _DEFAULT_USER_ID))
+    original = _row(conn, "SELECT * FROM car_candidates WHERE id = ?", (candidate_id,))
     if not original:
         raise AppError(4004, "候选车型不存在")
     data, errors = _validate_candidate(payload, original)
@@ -263,8 +260,7 @@ def update_candidate(conn: sqlite3.Connection, candidate_id: int, payload: dict)
 
 def delete_candidate(conn: sqlite3.Connection, upload_dir: Path, candidate_id: int) -> None:
     """物理删除：级联 offers/photos 行由 FK CASCADE 处理，照片物理文件逐一清理。"""
-    row = _row(conn, "SELECT id FROM car_candidates WHERE id = ? AND user_id = ?",
-               (candidate_id, _DEFAULT_USER_ID))
+    row = _row(conn, "SELECT id FROM car_candidates WHERE id = ?", (candidate_id,))
     if not row:
         raise AppError(4004, "候选车型不存在")
     for photo in Database.query(
@@ -490,7 +486,7 @@ def get_photo(conn: sqlite3.Connection, upload_dir: Path, photo_id: int) -> tupl
 
 
 def delete_photo(conn: sqlite3.Connection, upload_dir: Path, photo_id: int) -> None:
-    row, full = get_photo(conn, upload_dir, photo_id)
+    _, full = get_photo(conn, upload_dir, photo_id)
     full.unlink(missing_ok=True)
     Database.execute(conn, "DELETE FROM car_photos WHERE id = ?", (photo_id,))
 
@@ -502,8 +498,7 @@ def delete_photo(conn: sqlite3.Connection, upload_dir: Path, photo_id: int) -> N
 def compare(conn: sqlite3.Connection, id_list: list[int]) -> dict:
     rows = []
     for cid in id_list:
-        row = _row(conn, "SELECT * FROM car_candidates WHERE id = ? AND user_id = ?",
-                   (cid, _DEFAULT_USER_ID))
+        row = _row(conn, "SELECT * FROM car_candidates WHERE id = ?", (cid,))
         if not row:
             raise AppError(4004, f"候选车型 {cid} 不存在")
         rows.append(_decorate(conn, row))

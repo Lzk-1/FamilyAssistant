@@ -216,10 +216,11 @@ function openUploadDialog(data, refresh) {
   });
 
   const fileList = el("div", {});
-  // 文件输入挂在弹窗 DOM（隐藏）：保持交互不变，同时可被自动化测试定位
+  // 文件输入挂在弹窗 DOM（视觉隐藏但保留在无障碍树）：UI 不受影响，
+  // 同时可被自动化测试/辅助技术定位（display:none 会被 a11y 树排除）
   const fileInput = el("input", { type: "file", accept: ".jpg,.jpeg,.png,.webp,.heic" });
   fileInput.multiple = true;
-  fileInput.style.display = "none";
+  fileInput.style.cssText = "position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;";
   fileInput.addEventListener("change", () => {
     files = [...fileInput.files];
     renderFileList();

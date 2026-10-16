@@ -5,10 +5,11 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import car, files, finance, house, memo, system
+from app.api.v1 import auth, car, files, finance, house, memo, system
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(system.router, prefix="/system")
+api_router.include_router(auth.router, prefix="/auth", tags=["auth 认证"])
 api_router.include_router(finance.router, prefix="/finance", tags=["finance 理财"])
 api_router.include_router(house.router, prefix="/house", tags=["house 选房"])
 api_router.include_router(car.router, prefix="/car", tags=["car 选车"])

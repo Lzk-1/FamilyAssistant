@@ -1,9 +1,11 @@
 /** 资产详情页：关键数字 + 信息 + 市值历史 + 附件 + 操作日志 + 状态流转。
  *  路由：#/finance/assets/:id
+ *  权限（M4.1）：编辑/删除/流转/附件上传删除/市值与收益记录删除均仅 admin；成员只读。
  */
 
 import { apiGet, apiPost, apiDelete, apiUpload } from "../../api.js";
 import { el, btn, iconBtn, card, tag, emptyState, modal, toast, confirmModal, input, field, errorBanner } from "../../ui.js";
+import { isAdmin } from "../../session.js";
 import { fmtMoney, dueText, fmtMonth, statusVariant, STATUS_LABELS, SETTLE_LABELS, settleActions, CATEGORY_MAP, todayISO, yuanToCents } from "./common.js";
 import { openAssetDialog } from "./dialog.js";
 
@@ -16,6 +18,7 @@ export async function renderDetail(root, assetId) {
     root.appendChild(errorBanner(err.message));
     return;
   }
+  const admin = isAdmin();
 
   // 页头
   const header = el("div", { class: "detail-header" }, [
@@ -23,8 +26,8 @@ export async function renderDetail(root, assetId) {
     el("h2", { text: asset.name }),
     tag(STATUS_LABELS[asset.effective_status] || asset.effective_status, statusVariant(asset.effective_status)),
     el("div", { style: "flex:1" }),
-    btn("编辑", { variant: "secondary", icon: "edit", onClick: () => openAssetDialog(asset, () => renderDetail(root, assetId)) }),
-    btn("删除", { variant: "danger", icon: "trash", onClick: async () => {
+    admin ? btn("编辑", { variant: "secondary", icon: "edit", onClick: () => openAssetDialog(asset, () => renderDetail(root, assetId)) }) : null,
+    admin ? btn("删除", { variant: "danger", icon: "trash", onClick: async () => {
       const ok = await confirmModal({ title: "删除资产", message: `确定要删除「${asset.name}」吗？此操作不可恢复。`, confirmLabel: "删除", danger: true });
       if (ok) {
         try {
@@ -33,7 +36,7 @@ export async function renderDetail(root, assetId) {
           location.hash = "#/finance/assets";
         } catch (err) { toast(err.message, "err"); }
       }
-    }}),
+    }}) : null,
   ]);
   root.appendChild(header);
 
@@ -107,23 +110,23 @@ export async function renderDetail(root, assetId) {
   }
   root.appendChild(card("基本信息", infoGrid));
 
-  // 状态流转按钮（理财：实际收益录入入口）
+  // 状态流转按钮（理财：实际收益录入入口）——仅 admin
   const actions = settleActions(asset.category, asset.status);
-  const barButtons = actions.map((action) =>
+  const barButtons = admin ? actions.map((action) =>
     btn(SETTLE_LABELS[action], { variant: action === "clear" ? "danger" : "primary", onClick: () => handleSettle(asset, action, () => renderDetail(root, assetId)) })
-  );
-  if (asset.category === "wealth" && asset.status === "holding") {
+  ) : [];
+  if (admin && asset.category === "wealth" && asset.status === "holding") {
     barButtons.unshift(btn("更新实际收益", { variant: "secondary", onClick: () => openInterestDialog(asset, () => renderDetail(root, assetId)) }));
   }
   if (barButtons.length > 0) {
     root.appendChild(el("div", { class: "detail-action-bar" }, barButtons));
   }
 
-  // 市值历史
-  root.appendChild(card("市值历史", renderValues(asset)));
+  // 市值历史（admin 行内可删；删最新一条时后端自动回退当前金额）
+  root.appendChild(card("市值历史", renderValues(asset, assetId, () => renderDetail(root, assetId), admin)));
 
   // 附件
-  root.appendChild(card("附件归档", renderAttachments(asset, assetId, () => renderDetail(root, assetId))));
+  root.appendChild(card("附件归档", renderAttachments(asset, assetId, () => renderDetail(root, assetId), admin)));
 
   // 操作日志
   root.appendChild(card("操作日志", renderEvents(asset.events)));
@@ -136,28 +139,52 @@ function keyNum(label, value) {
   ]);
 }
 
-function renderValues(asset) {
+function renderValues(asset, assetId, refresh, admin) {
   const values = asset.values || [];
   if (values.length === 0) {
-    return emptyState("暂无市值记录", "点击「记录市值」可手动更新当前市值");
+    return emptyState("暂无市值记录",
+      admin ? "理财产品可通过「更新实际收益」录入快照，形成收益轨迹" : "");
   }
+  // 理财的快照是「本金+累计收益」，删除不回退本金金额（amount_cents 始终本金语义）；
+  // 其他分类（活期/贵金属等）删最新一条时后端把当前金额回退到剩余最新快照。
+  const isWealth = asset.category === "wealth";
   const container = el("div", {});
   for (const v of values) {
-    container.appendChild(el("div", { class: "detail-event" }, [
+    const row = el("div", { class: "detail-event" }, [
       el("span", { text: v.value_date, style: "font-size:13px" }),
       el("span", { text: fmtMoney(v.value_cents), style: "font-size:13px;font-weight:500;font-variant-numeric:tabular-nums" }),
       v.note ? el("span", { text: v.note, class: "detail-event__time" }) : null,
-    ]));
+      el("span", { style: "flex:1" }),
+      admin ? iconBtn("trash", {
+        variant: "ghost", size: "sm", title: "删除此市值记录",
+        onClick: async () => {
+          const rollbackHint = isWealth ? "" : "若删除的是最新一条，当前金额将回退到上一条记录。";
+          const ok = await confirmModal({
+            title: "删除市值记录",
+            message: `确定删除 ${v.value_date} 的记录（${fmtMoney(v.value_cents)}）吗？${rollbackHint}`,
+            confirmLabel: "删除", danger: true,
+          });
+          if (ok) {
+            try {
+              await apiDelete(`/finance/assets/${assetId}/values/${v.id}`);
+              toast("市值记录已删除", "ok");
+              refresh();
+            } catch (err) { toast(err.message, "err"); }
+          }
+        },
+      }) : null,
+    ]);
+    container.appendChild(row);
   }
   return container;
 }
 
-function renderAttachments(asset, assetId, refresh) {
+function renderAttachments(asset, assetId, refresh, admin) {
   const container = el("div", {});
   const attachments = asset.attachments || [];
 
-  // 上传按钮 + 进度条
-  const uploadBtn = btn("上传附件", { variant: "primary", size: "sm", icon: "upload", onClick: () => {
+  // 上传按钮 + 进度条（仅 admin）
+  const uploadBtn = admin ? btn("上传附件", { variant: "primary", size: "sm", icon: "upload", onClick: () => {
     const fileInput = document.createElement("input");
     fileInput.type = "file";
     fileInput.accept = ".jpg,.jpeg,.png,.webp,.heic,.pdf";
@@ -178,10 +205,11 @@ function renderAttachments(asset, assetId, refresh) {
       }
     };
     fileInput.click();
-  }});
+  }}) : null;
 
   if (attachments.length === 0) {
-    container.appendChild(emptyState("暂无附件", "上传借据照片、存单扫描件等关键材料"));
+    container.appendChild(emptyState("暂无附件",
+      admin ? "上传借据照片、存单扫描件等关键材料" : ""));
   } else {
     for (const att of attachments) {
       container.appendChild(el("div", { class: "detail-attachment" }, [
@@ -190,17 +218,17 @@ function renderAttachments(asset, assetId, refresh) {
         }}),
         el("span", { class: "detail-attachment__name", text: att.file_name }),
         el("span", { class: "detail-attachment__size", text: `${(att.file_size / 1024).toFixed(0)} KB` }),
-        iconBtn("trash", { variant: "ghost", size: "sm", title: "删除", onClick: async () => {
+        admin ? iconBtn("trash", { variant: "ghost", size: "sm", title: "删除", onClick: async () => {
           const ok = await confirmModal({ title: "删除附件", message: `确定删除「${att.file_name}」？`, confirmLabel: "删除", danger: true });
           if (ok) {
             try { await apiDelete(`/finance/attachments/${att.id}`); toast("已删除", "ok"); refresh(); }
             catch (err) { toast(err.message, "err"); }
           }
-        }}),
+        }}) : null,
       ]));
     }
   }
-  container.appendChild(uploadBtn);
+  if (uploadBtn) container.appendChild(uploadBtn);
   return container;
 }
 

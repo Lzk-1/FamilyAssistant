@@ -150,7 +150,7 @@
 | 模块 | 定位 | 核心实体（M0 已建表） | 计划 API 前缀 | M0 状态 |
 | --- | --- | --- | --- | --- |
 | 理财 finance | 家庭资产与收支全景 | `finance_accounts` 账户、`finance_transactions` 流水 | `/api/v1/finance` | 列表接口通、写接口占位 |
-| 选房 house | 房源档案与对比决策 | `house_candidates` 候选房源（价格/面积/户型/楼龄/优劣势/评分/状态） | `/api/v1/house` | 同上 |
+| 选房 house | 房源档案与对比决策 | `house_candidates` 候选房源（价格分制/面积/户型/朝向/配套标签/六维度评分/优劣势/状态）+ `house_photos` 房源照片（户型图/外观/室内，004 扩展）+ `house_scoring_config` 加权评分权重配置 | `/api/v1/house` | 已全量交付（v0.8.0） |
 | 选车 car | 车型档案与对比决策 | `car_candidates` 候选车型（品牌/能源/指导价/配置特点/里程/评分/状态）+ `car_offers` 4S 报价 + `car_photos` 实车照片（003 扩展） | `/api/v1/car` | 已全量交付（v0.7.0） |
 | 备忘录 memo | 家庭待办与提醒 | `memos`（优先级/状态/截止时间/标签/置顶） | `/api/v1/memo` | 同上 |
 | 文件存档 files | 家庭文件集中归档 | `file_records`（原名/存储路径/大小/类型/SHA256/分类） | `/api/v1/files` | 同上（上传依赖 python-multipart 已就绪） |
@@ -167,21 +167,24 @@
 
 ## 6. 数据库设计
 
-### 6.1 表清单（001 初始化；002 多群组见 §8.2，003 选车扩展行内标注）
+### 6.1 表清单（001 初始化；002 理财；003 选车；004 选房；005 多用户，扩展行内标注）
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
-| `users` | 多用户预留；M0 内置 admin | username、password_hash、role(admin/member)、is_active |
+| `users` | 登录账号（005 增列 must_change_password） | username、password_hash、display_name、role(admin/member)、is_active、must_change_password |
+| `sessions` | 登录会话（005 新增，只存 token 的 SHA-256 哈希） | token_hash、user_id、expires_at（绝对 30 天）、last_active_at（滑动 14 天）、user_agent |
 | `finance_accounts` | 理财账户 | user_id、name、type、currency、initial_balance |
 | `finance_transactions` | 收支流水 | account_id、kind(income/expense/transfer)、category、amount、occurred_at |
-| `house_candidates` | 候选房源 | title、community、city、total_price、area、layout、status、score、pros/cons |
+| `house_candidates` | 候选房源 | title、community、city、district、area(㎡)、layout、floor_info、orientation、build_year、total_price_cents/unit_price_cents(004 分制)、features(004 配套标签 JSON)、dim_scores(004 六维评分 JSON)、status、score、pros/cons |
+| `house_photos` | 房源照片元数据（004 新增，文件体存 `uploads/house/`） | candidate_id、kind(exterior/interior/layout/other)、file_path、file_size、file_type、remark |
+| `house_scoring_config` | 加权评分权重配置（004 新增，每用户一行） | user_id、weights(JSON：6 维度 0~100 合计 100) |
 | `car_candidates` | 候选车型 | brand、model、energy(fuel/ev/hybrid)、guide_price_cents(分)、features(003)、mileage、status、score |
 | `car_offers` | 4S 店报价单（003 新增） | candidate_id、dealer_name、city、offer_date、discount_items/fee_items/gift_items(JSON) |
 | `car_photos` | 实车照片元数据（003 新增，文件体存 `uploads/car/`） | candidate_id、kind(exterior/interior/other)、file_path、file_size、file_type、remark |
 | `memos` | 备忘录 | title、content、priority、status、due_at、tags、pinned |
 | `file_records` | 文件元数据 | original_name、stored_path、size、mime_type、sha256、category |
 
-**通用约定**：`id` 自增主键；`user_id` 预留协作（M0 默认 1=admin）；`created_at`/`updated_at` ISO 时间戳；命名蛇形复数；金额统一 REAL + CNY（M1 引入精度处理策略）。
+**通用约定**：`id` 自增主键；`user_id` 记录创建者（M4 起写入真实操作者，用于审计；数据归属为全家庭共享，见 §8.4）；`created_at`/`updated_at` ISO 时间戳；命名蛇形复数；金额统一 REAL + CNY（M1 引入精度处理策略）。
 
 ### 6.2 迁移机制
 
@@ -201,114 +204,39 @@
 
 ---
 
-## 8. 认证与多用户预留设计
+## 8. 认证与多用户设计（M4 已交付，v0.9.0）
 
-### 8.1 演进阶段
+完整设计（决策点 D1~D7、API 清单、测试要点）见 `docs/multi-user-module-design.md`。
 
-| 阶段 | 形态 | 实现 |
+### 8.1 两种形态
+
+| 形态 | 触发条件 | 行为 |
 | --- | --- | --- |
-| **M0（现在）** | 单机免登录模式 | `FA_AUTH_ENABLED=false`，依赖注入返回内置 admin；表结构与密码散列函数已就绪 |
-| **M1~M3** | 单机多用户 | 打开开关 → 登录接口签发随机 Token（`secrets` 生成）→ `api_tokens` 表校验；密码 `pbkdf2_sha256$<salt>$<hash>` |
-| **M4** | 多群组协作 | 在多用户之上叠加"家庭组"模型：`groups` / `group_members` 两表 + 业务表 `group_id` 列（实施依据见 8.2~8.5） |
-| **云部署（预留）** | 团队协作 | 同 Token 方案 + HTTPS 反向代理；角色模型与行级过滤已在所有列表 SQL 中预留 |
+| **单机免登录（默认）** | `FA_AUTH_ENABLED=false` | `get_current_user` 旁路返回内置 admin，接口无需登录与 CSRF 头，与 M0 行为完全一致（回归零风险） |
+| **多用户认证** | `FA_AUTH_ENABLED=true` | Cookie 会话认证 + admin/member 两档角色 + 全家庭共享数据 |
 
-内置账号：`admin / admin123`（占位，启用认证前必须修改，见 001_init.sql 注释）。
+内置账号 `admin / admin123`（001 占位弱口令）：启用认证后首登**强制改密**——005 迁移按弱口令哈希指纹精确匹配置 `must_change_password=1`，前端渲染不可跳过的改密视图；admin 建号/重置密码的初始密码同样要求首登改密。
 
-### 8.2 多群组表结构（migrations/002_groups.sql）
+### 8.2 会话机制（005_multi_user.sql）
 
-新增三张表：
+- **opaque token**（`secrets.token_urlsafe(32)`，256bit 熵）→ HttpOnly Cookie `fa_session`（SameSite=Lax、Path=/；HTTPS 部署附加 Secure；Max-Age 30 天）
+- `sessions` 表**只存 token 的 SHA-256 哈希**（泄库不可逆推）；登录签发新 token（会话固定防护）
+- **双限过期（OWASP）**：空闲 14 天滑动续期（`last_active_at`，1 小时节流避免每请求写库）+ 绝对 30 天上限（`expires_at` 不可续）
+- **CSRF 双保险**：SameSite=Lax + 写方法强制 `X-Requested-With: XMLHttpRequest`（缺失 → 403；GET 无副作用不校验；`/auth/login` 豁免）
 
-```sql
--- 访问令牌（M4.1）
-CREATE TABLE IF NOT EXISTS api_tokens (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL,
-    token_hash   TEXT    NOT NULL UNIQUE,    -- SHA256(token)，不落明文
-    name         TEXT    NOT NULL DEFAULT '', -- 设备/来源备注
-    expires_at   TEXT,                       -- 默认签发后 30 天
-    last_used_at TEXT,
-    created_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
-    FOREIGN KEY (user_id) REFERENCES users (id)
-);
+### 8.3 密码哈希与弱口令治理
 
--- 家庭组
-CREATE TABLE IF NOT EXISTS groups (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT    NOT NULL,
-    owner_id    INTEGER NOT NULL,           -- 组长（组内唯一 owner）
-    invite_code TEXT    NOT NULL UNIQUE,    -- 邀请码（secrets 生成，可重置）
-    is_default  INTEGER NOT NULL DEFAULT 0,  -- 单机模式回填的默认组（id=1）
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
-    updated_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
-    FOREIGN KEY (owner_id) REFERENCES users (id)
-);
+- 现行格式 `pbkdf2_sha256$600000$salt$hash`（OWASP 现行轮数）；旧 260k 三段式登录时**透明升级**（verify 返回 needs_rehash，Django 同款机制）
+- 本人改密吊销其他设备会话；admin 重置密码吊销目标成员全部会话
+- **三条铁律**：① id=1 首管理员不可禁用/降级；② 最后一个活跃 admin 不可禁用/降级（深度防御）；③ 成员只软禁用（`is_active=0`，会话即时吊销）不物理删除——保护业务表 `user_id` 外键引用
 
--- 组成员（组内角色载体）
-CREATE TABLE IF NOT EXISTS group_members (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id  INTEGER NOT NULL,
-    user_id   INTEGER NOT NULL,
-    role      TEXT    NOT NULL DEFAULT 'member',  -- owner / admin / member
-    joined_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
-    UNIQUE (group_id, user_id),
-    FOREIGN KEY (group_id) REFERENCES groups (id),
-    FOREIGN KEY (user_id)  REFERENCES users (id)
-);
-```
+### 8.4 数据归属与权限
 
-存量六张业务表统一补 `group_id`（同一迁移内完成回填）：
-
-```sql
-ALTER TABLE finance_accounts     ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE finance_transactions  ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE house_candidates     ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE car_candidates       ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE memos                ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE file_records         ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1;
-```
-
-**回填策略**：迁移内创建"默认家庭组"（`groups` id=1，`is_default=1`，owner=admin），全部存量行 `group_id` 置 1——单机用户升级到 M4 后数据无缝进入默认组，无需手工处理。
-
-### 8.3 角色模型（两级分离）
-
-| 层级 | 字段 | 取值 | 说明 |
-| --- | --- | --- | --- |
-| 系统角色 | `users.role` | admin / member | 平台级：admin 可管理用户与全部组；member 仅能操作自己所在的组 |
-| 组内角色 | `group_members.role` | owner / admin / member | 组级：owner 组长（唯一，可转让）；admin 组管理员；member 普通成员 |
-
-**权限矩阵（组内）**：
-
-| 操作 | owner | admin | member |
-| --- | --- | --- | --- |
-| 解散/设置组、转让 owner | 可 | 不可 | 不可 |
-| 重置邀请码、邀请/移除成员 | 可 | 可 | 不可 |
-| 查看组内共享数据 | 可 | 可 | 可 |
-| 新增/修改组内数据 | 可 | 可 | 可 |
-| 删除数据 | 可（任意） | 可（任意） | 仅限自己创建（`user_id` 匹配） |
-
-管理边界：owner 不可被移除（仅可转让）；admin 不能变更 owner/admin 角色；两级角色互不覆盖。
-
-### 8.4 数据可见性
-
-1. **隔离边界 = `group_id`**：业务列表 SQL 由 `WHERE user_id = ?` 改写为 `WHERE group_id = ?`；写入时同时记录 `user_id`（创建者）与 `group_id`（归属）；跨组访问一律 4004。
-2. **共享/私有两档**：业务表预留 `visibility` 列（`shared` 默认 / `private` 仅创建者可见）。家庭场景默认组内共享；特殊记录（个人账本、私密文件）可标记私有，查询时追加 `OR (visibility='private' AND user_id=当前用户)`。
-3. **文件命名空间**：上传路径升级为 `data/uploads/<group_id>/...`，物理目录与行级过滤双重隔离。
-4. **当前组上下文**：用户可属多组，登录后默认进入其默认组；切换组经 `POST /api/v1/groups/{id}/switch` 更新会话上下文（M4.2 后期增强，首版单组即可满足家庭场景）。
-
-### 8.5 服务层与 API 改造点（向后兼容）
-
-| 层 | 改动 | 影响范围 |
-| --- | --- | --- |
-| 依赖注入 `deps.py` | `get_current_user` 完成 Token 校验（`api_tokens`：SHA256 比对 + 过期检查 + 更新 `last_used_at`）；新增 `get_current_group` 返回组上下文 | 仅本文件 |
-| 服务层 `services/*.py` | 过滤条件改为 `group_id`；创建行补写 `group_id` / `user_id` / `visibility` | 5 个模块文件 |
-| 新增路由 | `POST /auth/login`、`POST /auth/logout`、`GET /auth/me`；`GET/POST /groups`、`GET /groups/{id}/members`、`POST /groups/join`（邀请码） | 新增 `api/v1/auth.py`、`api/v1/groups.py` |
-| 前端 | `#/login` 登录页、`#/settings` 组与成员管理页（UI 规范已预留路由） | app.js + 2 个页面模块 |
-| 兼容性 | 存量业务接口路径与响应包**不变**，仅请求头增加 `Authorization: Bearer <token>`；`FA_AUTH_ENABLED=false` 时全部跳过，单机行为与 M0 完全一致 | 无破坏性变更 |
-
-**实施顺序**：M4.1 Token 认证（`api_tokens` + 登录接口 + deps 校验）→ M4.2 群组（002 迁移 + 角色矩阵 + 数据可见性 + 组管理页）。两步可独立交付、独立验证。
+- **D1 全家庭共享**：读查询不做 `user_id` 过滤（全员可见可编辑）；写入记录真实操作者 `user_id`（审计）；例外：`house_scoring_config` 评分权重按用户隔离（个人偏好）
+- 两档固定角色（无自定义 RBAC）：admin 管成员（建号/编辑/禁用/重置密码），member 仅业务功能；成员管理接口越权一律 403
+- 认证模式错误码：`4001` 未认证（401）、`4003` 权限不足/CSRF 拦截（403）；前端 401 钩子统一回登录视图
 
 ---
-
 ## 9. 配置管理
 
 单机**零配置可启动**（全部有默认值）；云端通过 `FA_` 前缀环境变量覆盖（12-Factor）：
@@ -319,8 +247,8 @@ ALTER TABLE file_records         ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1;
 | `FA_PORT` | `8300` | 监听端口 |
 | `FA_DEBUG` | `false` | 调试模式 |
 | `FA_DATA_DIR` | `<项目>/data` | 数据目录（DB + 上传文件） |
-| `FA_AUTH_ENABLED` | `false` | 认证开关 |
-| `FA_SECRET_KEY` | 占位值 | Token 签名密钥（生产必改） |
+| `FA_AUTH_ENABLED` | `false` | 认证开关：`false` 单机免登录（默认，行为与 M0 一致）；`true` 启用 Cookie 会话认证（内置 admin 首登强制改密，见第 8 节） |
+| `FA_SECRET_KEY` | 占位值 | 预留密钥（会话为服务端 opaque 存储，未参与签名；生产环境仍建议修改） |
 | `FA_CORS_ORIGINS` | 空 | 跨域白名单（前后端分离部署时使用） |
 
 ---
@@ -386,8 +314,8 @@ FamilyAssistant/
 | **M0 框架（本次）** | 分层骨架、DB 与迁移机制、模块注册表、统一响应包、SPA 壳与五模块占位页、启动脚本与 Docker、健康检查测试 | 可运行的整体框架 |
 | **M1** | 备忘录 MVP（CRUD+提醒）、文件存档 MVP（上传/下载/分类） | 两个可用模块 |
 | **M2** | 理财模块（M2a 资产/负债台账+成员+附件后端，M2b 总览/台账/详情/日历前端，M2c 产品对比分析，M2d 理财实际收益录入与轨迹，M3a 收益分析：月度趋势/分类与成员贡献/明细，M3b 数据导入导出：JSON/ZIP 备份与 CSV 导出、merge/restore 导入 + 负债分类增强：房贷预计结清月/已还本金/下次扣款日、信用卡下一还款日/距还款日） | 理财可用 |
-| **M3** | 选车模块全量交付：车型档案 + 详情（关键数字/配置特点/照片 lightbox）+ 4S 报价对比（含购置税预填推算）+ 跨车型对比矩阵，v0.7.0；选房 MVP（档案+对比评分）待开发 | 选车可用（选房待开发） |
-| **M4** | 多用户认证与多群组协作（Token / 两级角色 / 家庭组，实施依据见第 8 节 8.2~8.5） | 协作能力 |
+| **M3** | 选车模块全量交付：车型档案 + 详情（关键数字/配置特点/照片 lightbox）+ 4S 报价对比（含购置税预填推算）+ 跨车型对比矩阵，v0.7.0；选房模块全量交付：房源档案 + 详情（关键数字/配套设施/维度评分/照片 lightbox 含户型图）+ 跨房源对比矩阵 + 六维度加权评分（用户可自定义权重），v0.8.0 | 选车可用、选房可用 |
+| **M4** | 多用户认证（**已交付 v0.9.0**）：Cookie 会话（opaque token 双限过期）+ admin/member 角色 + 全家庭共享 + 首登强制改密 + 成员管理（实施依据见第 8 节与 multi-user-module-design.md） | 协作能力 |
 | **M5** | 云端部署增强（PostgreSQL 可选、HTTPS、备份脚本、监控） | 生产化 |
 
 ---
@@ -399,7 +327,7 @@ FamilyAssistant/
 | SQLite 并发写限制 | WAL + 单实例部署；多实例需求出现时按预案切 PostgreSQL |
 | 无 ORM 的 SQL 维护成本 | 语句集中在服务层、表结构强约定；复杂查询出现时再评估引入 SQLAlchemy |
 | 原生前端复杂度上限 | 以 `/api/v1` 契约为界，必要时整体替换为 Vue/Vite 构建版，后端零改动 |
-| admin 默认口令 | 仅占位；启用认证（M4）前强制修改；compose 默认关闭公网暴露 |
+| admin 默认口令 | M4 已实现首登强制改密（005 迁移按弱口令指纹标记）；compose 默认关闭公网暴露 |
 | 数据丢失 | `data/` 目录整体备份策略 + M5 自动快照 |
 
 ---

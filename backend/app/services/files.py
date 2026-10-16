@@ -10,12 +10,10 @@ import sqlite3
 
 from app.core.database import Database
 
-_DEFAULT_USER_ID = 1
-
 
 def list_records(conn: sqlite3.Connection) -> list[dict]:
+    # M4 全家庭共享（design §4.3）：读不过滤 user_id
     return Database.query(
         conn,
-        "SELECT * FROM file_records WHERE user_id = ? ORDER BY id DESC",
-        (_DEFAULT_USER_ID,),
+        "SELECT * FROM file_records ORDER BY id DESC",
     )

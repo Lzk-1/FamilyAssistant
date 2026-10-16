@@ -1,10 +1,12 @@
 /** 资产台账页：分类侧栏 + 分组表格 + 筛选 + 搜索 + 新增/成员管理入口。
  *  分类树点击筛选，分组表头折叠/展开，行着色按状态，行点击进详情。
+ *  权限（M4.1）：写操作（新增/导入/成员管理/批量删除）仅 admin；成员只读。
  */
 
-import { apiGet } from "../../api.js";
-import { el, btn, input, select, tag, emptyState, toast } from "../../ui.js";
+import { apiGet, apiPost, apiDelete } from "../../api.js";
+import { el, btn, input, select, tag, emptyState, toast, confirmModal, iconBtn } from "../../ui.js";
 import { icon } from "../../icons.js";
+import { isAdmin } from "../../session.js";
 import { fmtMoney, statusVariant, statusRowClass, dueText, fmtMonth, STATUS_LABELS, CATEGORY_MAP, categoryColor, fetchMembers, toggleCompare, addManyToCompare, getCompareIds } from "./common.js";
 import { openAssetDialog } from "./dialog.js";
 import { openMembersDialog } from "./members.js";
@@ -18,8 +20,11 @@ export async function renderLedger(root, query) {
   let currentStatus = "";
   let searchKeyword = query.q || ""; // 总览机构分布图跳转：按机构名预填搜索
   const collapsedGroups = new Set();
-  const compareSelected = new Set(); // 当前页勾选待加入对比的资产 id
+  const selectedIds = new Set(); // 行首勾选：admin 可用于「加入对比/批量删除」，成员仅用于对比
+  const rowMap = new Map();     // 当前列表 id → 行数据（判断资产/负债、单删取名称）
   let compareLabel; // 工具栏「加入对比」按钮的文案节点（动态更新计数）
+  let deleteLabel;  // 工具栏「批量删除」按钮的文案节点
+  const admin = isAdmin();
 
   // 初始数据
   let data = await fetchData();
@@ -136,46 +141,135 @@ export async function renderLedger(root, query) {
     toolbar.appendChild(holderSelect);
     toolbar.appendChild(statusSelect);
     toolbar.appendChild(el("div", { style: "flex:1" }));
-    // 加入对比（勾选 ≥1 时可用，计入 basket 后跳转对比页，compare-design §4.2）
-    compareLabel = el("span", { text: "加入对比" });
+
+    // 加入对比（统一勾选：仅资产参与，负债自动剔除并提示）
+    compareLabel = document.createTextNode("加入对比");
     const compareBtn = el("button", {
       class: "fa-btn fa-btn--secondary fa-btn--sm",
       disabled: true,
-      onClick: () => {
-        if (compareSelected.size === 0) return;
-        const r = addManyToCompare([...compareSelected]);
-        toast(r.reason, r.ok ? "ok" : "warn");
-        if (r.ok) {
-          compareSelected.clear();
-          syncCompareBtn();
-          location.hash = "#/finance/compare";
-        }
-      },
+      onClick: () => addSelectedToCompare(),
     }, [compareLabel]);
     toolbar.appendChild(compareBtn);
-    toolbar.appendChild(btn("导入", { variant: "secondary", size: "sm", icon: "upload", onClick: () => openImportDialog(refresh) }));
-    toolbar.appendChild(btn("导出", { variant: "secondary", size: "sm", icon: "download", onClick: openExportDialog }));
-    toolbar.appendChild(btn("成员管理", { variant: "secondary", size: "sm", icon: "note", onClick: () => openMembersDialog(refresh) }));
-    toolbar.appendChild(btn("新增资产", { variant: "primary", icon: "plus", onClick: () => openAssetDialog(null, refresh) }));
-    syncCompareBtn();
+    if (admin) {
+      // 顺序：导入 → 导出（数据交换一对）→ 成员管理 → 批量删除 → 新增资产（主按钮收尾）
+      toolbar.appendChild(btn("导入", { variant: "secondary", size: "sm", icon: "upload", onClick: () => openImportDialog(refresh) }));
+      toolbar.appendChild(btn("导出", { variant: "secondary", size: "sm", icon: "download", onClick: openExportDialog }));
+      toolbar.appendChild(btn("成员管理", { variant: "secondary", size: "sm", icon: "note", onClick: () => openMembersDialog(refresh) }));
+      deleteLabel = document.createTextNode("批量删除");
+      const batchDelBtn = el("button", {
+        class: "fa-btn fa-btn--secondary fa-btn--sm",
+        disabled: true,
+        onClick: () => execBatchDelete(),
+      }, [icon("trash", 14), deleteLabel]);
+      toolbar.appendChild(batchDelBtn);
+      toolbar.appendChild(btn("新增资产", { variant: "primary", icon: "plus", onClick: () => openAssetDialog(null, refresh) }));
+    } else {
+      toolbar.appendChild(btn("导出", { variant: "secondary", size: "sm", icon: "download", onClick: openExportDialog }));
+    }
+    syncActionButtons();
   }
 
-  /** 同步工具栏「加入对比」按钮的可用态与计数（不重建输入框，避免失焦） */
-  function syncCompareBtn() {
-    const btnNode = compareLabel?.parentElement;
-    if (!btnNode) return;
-    const n = compareSelected.size;
-    compareLabel.textContent = n > 0 ? `加入对比（${n}）` : "加入对比";
-    btnNode.disabled = n === 0;
+  /** 当前勾选中的资产/负债拆分 */
+  function selectedSplit() {
+    const assetIds = [], liabilityCount = { n: 0 };
+    for (const id of selectedIds) {
+      const row = rowMap.get(Number(id));
+      if (!row) continue;
+      if (row.direction === "liability") liabilityCount.n += 1;
+      else assetIds.push(Number(id));
+    }
+    return { assetIds, liabilityCount: liabilityCount.n };
+  }
+
+  async function addSelectedToCompare() {
+    if (selectedIds.size === 0) return;
+    const { assetIds, liabilityCount } = selectedSplit();
+    if (assetIds.length === 0) {
+      toast("负债无收益概念，暂不支持对比", "warn");
+      return;
+    }
+    const r = addManyToCompare(assetIds);
+    toast(r.ok && liabilityCount > 0
+      ? `${r.reason}；${liabilityCount} 项负债不支持对比已自动跳过`
+      : r.reason, r.ok ? "ok" : "warn");
+    if (r.ok) {
+      selectedIds.clear();
+      syncActionButtons();
+      renderList();
+      location.hash = "#/finance/compare";
+    }
+  }
+
+  async function execBatchDelete() {
+    if (selectedIds.size === 0) return;
+    const n = selectedIds.size;
+    const ok = await confirmModal({
+      title: "批量删除资产",
+      message: `确定删除勾选的 ${n} 项资产吗？删除后从台账消失且不可恢复。`,
+      confirmLabel: `删除 ${n} 项`,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const result = await apiPost("/finance/assets/batch-delete", { ids: [...selectedIds] });
+      const missing = result.missing?.length || 0;
+      toast(missing ? `已删除 ${result.deleted} 项，${missing} 项不存在或已被删除` : `已删除 ${result.deleted} 项`, "ok");
+      selectedIds.clear();
+      await refresh();
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  }
+
+  /** 行尾垃圾桶：直接删除单行（二次确认） */
+  async function deleteSingle(row) {
+    const ok = await confirmModal({
+      title: "删除资产",
+      message: `确定删除「${row.name}」吗？删除后从台账消失且不可恢复。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await apiDelete(`/finance/assets/${row.id}`);
+      toast("已删除", "ok");
+      selectedIds.delete(row.id);
+      await refresh();
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  }
+
+  /** 同步「加入对比 / 批量删除」两个按钮的计数与可用态（不重建输入框，避免失焦） */
+  function syncActionButtons() {
+    const n = selectedIds.size;
+    const cBtn = compareLabel?.parentElement;
+    if (cBtn) {
+      compareLabel.textContent = n > 0 ? `加入对比（${n}）` : "加入对比";
+      cBtn.disabled = n === 0;
+    }
+    const dBtn = deleteLabel?.parentElement;
+    if (dBtn) {
+      deleteLabel.textContent = n > 0 ? `批量删除（${n}）` : "批量删除";
+      dBtn.disabled = n === 0;
+    }
   }
 
   function renderList() {
     listBox.innerHTML = "";
+    // 同步行数据索引；筛选/删除后清掉已不在列表中的勾选项
+    rowMap.clear();
+    for (const item of data.items) rowMap.set(item.id, item);
+    for (const id of [...selectedIds]) if (!rowMap.has(Number(id))) selectedIds.delete(Number(id));
+    syncActionButtons();
     if (data.items.length === 0) {
-      const empty = emptyState("暂无资产记录", "点击右上角「新增资产」开始记录你的家庭资产");
-      empty.appendChild(el("div", { class: "empty-action" }, [
-        btn("新增资产", { variant: "primary", icon: "plus", onClick: () => openAssetDialog(null, refresh) }),
-      ]));
+      const empty = emptyState("暂无资产记录",
+        admin ? "点击右上角「新增资产」开始记录你的家庭资产" : "管理员尚未添加资产记录");
+      if (admin) {
+        empty.appendChild(el("div", { class: "empty-action" }, [
+          btn("新增资产", { variant: "primary", icon: "plus", onClick: () => openAssetDialog(null, refresh) }),
+        ]));
+      }
       listBox.appendChild(empty);
       return;
     }
@@ -210,17 +304,15 @@ export async function renderLedger(root, query) {
 
       // 表格
       const cols = [
-        { label: "", key: "_compare", render: (row) => {
-          // 对比勾选列（compare-design §4.2）：负债行禁用
-          const cb = el("input", { type: "checkbox", class: "compare-check" });
-          cb.checked = compareSelected.has(row.id);
-          cb.disabled = row.direction === "liability";
-          cb.title = row.direction === "liability" ? "负债无收益概念，暂不支持对比" : "勾选加入对比";
+        { label: "", key: "_select", render: (row) => {
+          // 通用勾选列：勾选结果同时供「加入对比」（只取资产）与「批量删除」（admin）使用
+          const cb = el("input", { type: "checkbox", class: "compare-check", title: "勾选" });
+          cb.checked = selectedIds.has(row.id);
           cb.addEventListener("change", (e) => {
-            e.stopPropagation();
-            if (e.target.checked) compareSelected.add(row.id);
-            else compareSelected.delete(row.id);
-            syncCompareBtn();
+            if (e.target.checked) selectedIds.add(row.id);
+            else selectedIds.delete(row.id);
+            e.target.closest("tr")?.classList.toggle("asset-row--selected", e.target.checked);
+            syncActionButtons();
           });
           const td = el("span", {}, [cb]);
           td.addEventListener("click", (e) => e.stopPropagation()); // 防止触发行点击进详情
@@ -259,17 +351,25 @@ export async function renderLedger(root, query) {
                 },
               })
             : null,
+          admin
+            ? iconBtn("trash", {
+                variant: "ghost", size: "sm", title: "删除该行",
+                onClick: (e) => { e.stopPropagation(); deleteSingle(row); },
+              })
+            : null,
         ]) },
       ];
 
-      const tbody = items.map((row) =>
-        el("tr", {
-          class: `asset-row ${statusRowClass(row.effective_status)}`,
+      const tbody = items.map((row) => {
+        const tr = el("tr", {
+          class: `asset-row ${statusRowClass(row.effective_status)}${selectedIds.has(row.id) ? " asset-row--selected" : ""}`,
           onClick: () => { location.hash = `#/finance/assets/${row.id}`; },
-        }, cols.map((col) =>
-          el("td", {}, [col.render ? col.render(row) : (row[col.key] || "—")])
-        ))
-      );
+        });
+        for (const col of cols) {
+          tr.appendChild(el("td", {}, [col.render ? col.render(row) : (row[col.key] || "—")]));
+        }
+        return tr;
+      });
 
       const tbl = el("table", { class: "table" }, [
         el("thead", {}, [el("tr", {}, cols.map((c) => el("th", { text: c.label })))]),

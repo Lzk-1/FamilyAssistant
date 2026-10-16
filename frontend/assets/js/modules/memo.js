@@ -3,14 +3,13 @@
 import { apiGet } from "../api.js";
 import { pageHeader, placeholderCard, card, table } from "../ui.js";
 
-const MILESTONE = "M1";
 const FEATURES = "增删改查 · 优先级 · 到期提醒 · 标签分类";
 
 const PRIORITY_LABEL = { low: "低", normal: "中", high: "高" };
 const STATUS_LABEL = { open: "进行中", done: "已完成" };
 
 export async function render(root, mod) {
-  root.appendChild(pageHeader(mod, MILESTONE));
+  root.appendChild(pageHeader(mod));
   const memos = await apiGet("/memo/memos");
   root.appendChild(
     memos.length

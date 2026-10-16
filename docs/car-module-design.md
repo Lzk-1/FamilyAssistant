@@ -2,10 +2,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 版本 | v0.1（设计评审稿） |
+| 版本 | v1.0（实施完成，决策点已全部确认） |
 | 日期 | 2026-10-15 |
 | 上游输入 | [architecture.md](architecture.md) M3 定位、[ui-design.md](ui-design.md) 全局规范、[finance-module-design.md](finance-module-design.md) 模块设计模式 |
-| 状态 | 待评审（3 个决策点见 §8） |
+| 状态 | 已全量交付（v0.7.0，实施状态见 §6） |
 
 ---
 

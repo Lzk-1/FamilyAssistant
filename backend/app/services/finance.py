@@ -168,7 +168,8 @@ def _event_summary(event_type: str, detail: dict, asset_name: str) -> str:
     mapping = {
         "create": f"创建资产 {asset_name}",
         "update": f"更新 {asset_name} 信息",
-        "value": f"更新 {asset_name} 市值{money}",
+        "value": (f"删除 {asset_name} 市值记录{money}"
+                  if detail.get("action") == "delete" else f"更新 {asset_name} 市值{money}"),
         "attachment": f"{asset_name} 上传附件 {detail.get('file_name', '')}",
         "settle": f"{asset_name} {_SETTLE_LABELS.get(detail.get('action', ''), '流转')}{money}",
         "repay": f"{asset_name} 登记还款{money}",
@@ -541,6 +542,25 @@ def soft_delete_asset(conn: sqlite3.Connection, asset_id: int, user_id: int = _D
     add_event(conn, asset_id, "settle", {"action": "delete", "name": asset["name"]}, user_id)
 
 
+def batch_delete_assets(conn: sqlite3.Connection, ids: Any, user_id: int = _DEFAULT_USER_ID) -> dict:
+    """批量软删除：逐条走 soft_delete_asset（事件留痕），不存在的 id 汇总返回。"""
+    if not isinstance(ids, list) or not ids or len(ids) > 100:
+        raise AppError(4001, "ids: 应为 1-100 个资产 id 的数组")
+    try:
+        id_list = [int(x) for x in ids]
+    except (TypeError, ValueError):
+        raise AppError(4001, "ids: 应为数字数组")
+    deleted, missing = 0, []
+    for asset_id in id_list:
+        row = _row(conn, "SELECT id FROM finance_assets WHERE id = ? AND is_deleted = 0", (asset_id,))
+        if not row:
+            missing.append(asset_id)
+            continue
+        soft_delete_asset(conn, asset_id, user_id)
+        deleted += 1
+    return {"deleted": deleted, "missing": missing}
+
+
 def get_asset(conn: sqlite3.Connection, asset_id: int) -> dict:
     asset = _row(conn, "SELECT * FROM finance_assets WHERE id = ? AND is_deleted = 0", (asset_id,))
     if not asset:
@@ -731,6 +751,39 @@ def add_value(conn: sqlite3.Connection, asset_id: int, payload: dict,
     )
     add_event(conn, asset_id, "value", {"amount_cents": value, "date": value_date}, user_id)
     return {"value_cents": value, "value_date": value_date}
+
+
+def delete_value(conn: sqlite3.Connection, asset_id: int, value_id: int,
+                 user_id: int = _DEFAULT_USER_ID) -> None:
+    """删除一条市值记录：若删的是当前金额所依据的最新快照，则回退到剩余最新一条。
+
+    全部删空时保留当前金额不变（无法推断删除前的口径，用户可自行编辑资产金额）。
+    """
+    asset = _row(conn, "SELECT * FROM finance_assets WHERE id = ? AND is_deleted = 0", (asset_id,))
+    if not asset:
+        raise AppError(4004, "资产不存在")
+    row = _row(
+        conn, "SELECT * FROM finance_asset_values WHERE id = ? AND asset_id = ?", (value_id, asset_id),
+    )
+    if not row:
+        raise AppError(4004, "市值记录不存在")
+    Database.execute(
+        conn, "DELETE FROM finance_asset_values WHERE id = ?", (value_id,),
+    )
+    # 删除的恰是最新一条（与 add_value 写入 amount_cents 的口径一致）→ 回退到剩余最新快照
+    latest = Database.query(
+        conn,
+        "SELECT value_cents FROM finance_asset_values WHERE asset_id = ? "
+        "ORDER BY value_date DESC, id DESC LIMIT 1",
+        (asset_id,),
+    )
+    if latest and row["value_cents"] == asset["amount_cents"]:
+        Database.execute(
+            conn, "UPDATE finance_assets SET amount_cents=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (latest[0]["value_cents"], asset_id),
+        )
+    add_event(conn, asset_id, "value",
+              {"action": "delete", "amount_cents": row["value_cents"], "date": row["value_date"]}, user_id)
 
 
 def add_interest(conn: sqlite3.Connection, asset_id: int, payload: dict,

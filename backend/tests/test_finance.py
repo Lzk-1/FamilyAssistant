@@ -423,6 +423,61 @@ def test_values_history() -> None:
         assert client.get("/api/v1/finance/assets/99999/values").status_code == 404
 
 
+def test_value_delete_rolls_back_amount() -> None:
+    """删最新快照回退当前金额；删历史快照不动金额；跨资产 id 隔离。"""
+    with make_client()[0] as client:
+        a = create_asset(client, name="活期A", category="demand", amount_cents=1_000_000)
+        b = create_asset(client, name="活期B", category="demand", amount_cents=1_000_000)
+        for cents, offset in [(1_100_000, -2), (1_200_000, -1), (1_300_000, 0)]:
+            assert client.post(f"/api/v1/finance/assets/{a['id']}/values",
+                               json={"value_cents": cents, "value_date": day(offset)}).status_code == 200
+        client.post(f"/api/v1/finance/assets/{b['id']}/values",
+                    json={"value_cents": 900_000, "value_date": day(0)})
+        vb_id = client.get(f"/api/v1/finance/assets/{b['id']}/values").json()["data"][0]["id"]
+        values = client.get(f"/api/v1/finance/assets/{a['id']}/values").json()["data"]
+        v_old, v_mid, v_new = values[0]["id"], values[1]["id"], values[2]["id"]
+
+        # 删历史快照：当前金额（1_300_000）不受影响
+        assert client.delete(f"/api/v1/finance/assets/{a['id']}/values/{v_old}").status_code == 200
+        assert client.get(f"/api/v1/finance/assets/{a['id']}").json()["data"]["amount_cents"] == 1_300_000
+        # 删最新快照：回退到剩余最新一条（1_200_000）
+        assert client.delete(f"/api/v1/finance/assets/{a['id']}/values/{v_new}").status_code == 200
+        assert client.get(f"/api/v1/finance/assets/{a['id']}").json()["data"]["amount_cents"] == 1_200_000
+        # 删空后当前金额保留（无从推断删除前口径）
+        assert client.delete(f"/api/v1/finance/assets/{a['id']}/values/{v_mid}").status_code == 200
+        detail = client.get(f"/api/v1/finance/assets/{a['id']}").json()["data"]
+        assert detail["amount_cents"] == 1_200_000
+        assert detail["values"] == []
+        # 事件摘要：删除文案
+        assert "删除" in detail["events"][0]["summary"]
+        # 跨资产：B 的 value id 在 A 上删除 → 404
+        assert client.delete(f"/api/v1/finance/assets/{a['id']}/values/{vb_id}").status_code == 404
+        # 不存在的 value / 资产
+        assert client.delete(f"/api/v1/finance/assets/{a['id']}/values/99999").status_code == 404
+        assert client.delete(f"/api/v1/finance/assets/99999/values/1").status_code == 404
+
+
+def test_batch_delete_assets() -> None:
+    with make_client()[0] as client:
+        a1 = create_asset(client, name="待删1")
+        a2 = create_asset(client, name="待删2")
+        a3 = create_asset(client, name="保留")
+        resp = client.post("/api/v1/finance/assets/batch-delete",
+                           json={"ids": [a1["id"], a2["id"], 99999]})
+        assert resp.status_code == 200
+        assert resp.json()["data"] == {"deleted": 2, "missing": [99999]}
+        # 列表只剩 a3；被删的详情 404；操作日志留痕
+        ids = [a["id"] for a in client.get("/api/v1/finance/assets").json()["data"]["items"]]
+        assert ids == [a3["id"]]
+        assert client.get(f"/api/v1/finance/assets/{a1['id']}").status_code == 404
+        # 参数校验：空数组 / 非数组 / 非数字 / 超过 100 个
+        assert client.post("/api/v1/finance/assets/batch-delete", json={"ids": []}).status_code == 400
+        assert client.post("/api/v1/finance/assets/batch-delete", json={"ids": "x"}).status_code == 400
+        assert client.post("/api/v1/finance/assets/batch-delete", json={"ids": ["a"]}).status_code == 400
+        assert client.post("/api/v1/finance/assets/batch-delete",
+                           json={"ids": [1] * 101}).status_code == 400
+
+
 # ============ 实际收益录入（M2d，仅理财） ============
 
 def test_interest_recording() -> None:

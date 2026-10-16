@@ -30,9 +30,9 @@ def list_candidates(conn=Depends(get_db)) -> dict:
     return ok(car_service.list_candidates(conn))
 
 
-@router.post("/candidates", dependencies=[Depends(get_current_user)])
-def create_candidate(payload: dict, conn=Depends(get_db)) -> dict:
-    return ok(car_service.create_candidate(conn, payload))
+@router.post("/candidates")
+def create_candidate(payload: dict, conn=Depends(get_db), user=Depends(get_current_user)) -> dict:
+    return ok(car_service.create_candidate(conn, payload, user["id"]))
 
 
 # 对比矩阵：注册顺序必须先于 /candidates/{candidate_id}，避免 "compare" 被当作路径参数

@@ -42,8 +42,8 @@ export function tag(text, variant = "primary") {
   return el("span", { class: `fa-tag fa-tag--${variant}`, text });
 }
 
-/** 页头：模块徽标 + 名称 + 描述 + 交付里程碑标签（规范 5.x 线框） */
-export function pageHeader(mod, milestone) {
+/** 页头：模块徽标 + 名称 + 描述 */
+export function pageHeader(mod) {
   return el("div", { class: "page-header" }, [
     el("div", { class: "page-header__main" }, [
       moduleBadge(mod.key),
@@ -52,7 +52,6 @@ export function pageHeader(mod, milestone) {
         el("p", { text: mod.description }),
       ]),
     ]),
-    milestone ? tag(`${milestone} 迭代交付`, "primary") : null,
   ]);
 }
 
