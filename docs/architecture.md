@@ -129,6 +129,14 @@
   → 前端渲染表格 / 空状态
 ```
 
+### 4.4 静态资源缓存策略（v0.7.0 引入）
+
+零构建前端依赖浏览器 HTTP 缓存，采用「入口版本参数 + 服务端协商缓存」两层策略（详见 docs/car-module-design.md §9）：
+
+- `main.py` `static_no_cache` 中间件：非 `/api/` 响应统一输出 `Cache-Control: no-cache`，走 ETag 协商（未变更 304 / 已变更即时生效）。
+- 入口引用带版本参数（`?v=0.7.0`，发布时递增）：`index.html` 的 CSS/JS 与 `app.js` 的模块导入。
+- 首次升级需一次硬刷新（Ctrl+F5）；此后前端文件更新无需用户手动刷新。
+
 ---
 
 ## 5. 模块设计
@@ -143,7 +151,7 @@
 | --- | --- | --- | --- | --- |
 | 理财 finance | 家庭资产与收支全景 | `finance_accounts` 账户、`finance_transactions` 流水 | `/api/v1/finance` | 列表接口通、写接口占位 |
 | 选房 house | 房源档案与对比决策 | `house_candidates` 候选房源（价格/面积/户型/楼龄/优劣势/评分/状态） | `/api/v1/house` | 同上 |
-| 选车 car | 车型档案与对比决策 | `car_candidates` 候选车型（品牌/能源/价格/里程/评分/状态） | `/api/v1/car` | 同上 |
+| 选车 car | 车型档案与对比决策 | `car_candidates` 候选车型（品牌/能源/指导价/配置特点/里程/评分/状态）+ `car_offers` 4S 报价 + `car_photos` 实车照片（003 扩展） | `/api/v1/car` | 已全量交付（v0.7.0） |
 | 备忘录 memo | 家庭待办与提醒 | `memos`（优先级/状态/截止时间/标签/置顶） | `/api/v1/memo` | 同上 |
 | 文件存档 files | 家庭文件集中归档 | `file_records`（原名/存储路径/大小/类型/SHA256/分类） | `/api/v1/files` | 同上（上传依赖 python-multipart 已就绪） |
 
@@ -159,7 +167,7 @@
 
 ## 6. 数据库设计
 
-### 6.1 表清单（migrations/001_init.sql）
+### 6.1 表清单（001 初始化；002 多群组见 §8.2，003 选车扩展行内标注）
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
@@ -167,7 +175,9 @@
 | `finance_accounts` | 理财账户 | user_id、name、type、currency、initial_balance |
 | `finance_transactions` | 收支流水 | account_id、kind(income/expense/transfer)、category、amount、occurred_at |
 | `house_candidates` | 候选房源 | title、community、city、total_price、area、layout、status、score、pros/cons |
-| `car_candidates` | 候选车型 | brand、model、energy(fuel/ev/hybrid)、price、mileage、status、score |
+| `car_candidates` | 候选车型 | brand、model、energy(fuel/ev/hybrid)、guide_price_cents(分)、features(003)、mileage、status、score |
+| `car_offers` | 4S 店报价单（003 新增） | candidate_id、dealer_name、city、offer_date、discount_items/fee_items/gift_items(JSON) |
+| `car_photos` | 实车照片元数据（003 新增，文件体存 `uploads/car/`） | candidate_id、kind(exterior/interior/other)、file_path、file_size、file_type、remark |
 | `memos` | 备忘录 | title、content、priority、status、due_at、tags、pinned |
 | `file_records` | 文件元数据 | original_name、stored_path、size、mime_type、sha256、category |
 
@@ -376,7 +386,7 @@ FamilyAssistant/
 | **M0 框架（本次）** | 分层骨架、DB 与迁移机制、模块注册表、统一响应包、SPA 壳与五模块占位页、启动脚本与 Docker、健康检查测试 | 可运行的整体框架 |
 | **M1** | 备忘录 MVP（CRUD+提醒）、文件存档 MVP（上传/下载/分类） | 两个可用模块 |
 | **M2** | 理财模块（M2a 资产/负债台账+成员+附件后端，M2b 总览/台账/详情/日历前端，M2c 产品对比分析，M2d 理财实际收益录入与轨迹，M3a 收益分析：月度趋势/分类与成员贡献/明细，M3b 数据导入导出：JSON/ZIP 备份与 CSV 导出、merge/restore 导入 + 负债分类增强：房贷预计结清月/已还本金/下次扣款日、信用卡下一还款日/距还款日） | 理财可用 |
-| **M3** | 选房/选车 MVP（档案+对比评分） | 五模块全量可用 |
+| **M3** | 选车模块全量交付：车型档案 + 详情（关键数字/配置特点/照片 lightbox）+ 4S 报价对比（含购置税预填推算）+ 跨车型对比矩阵，v0.7.0；选房 MVP（档案+对比评分）待开发 | 选车可用（选房待开发） |
 | **M4** | 多用户认证与多群组协作（Token / 两级角色 / 家庭组，实施依据见第 8 节 8.2~8.5） | 协作能力 |
 | **M5** | 云端部署增强（PostgreSQL 可选、HTTPS、备份脚本、监控） | 生产化 |
 

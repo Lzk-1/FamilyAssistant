@@ -256,3 +256,47 @@ export function confirmModal({ title, message, confirmLabel = "确认", danger }
     });
   });
 }
+
+/** Lightbox 大图预览（ui-design 文件存档「图片直显」规范）：images = [{src, name?}]，
+ *  index 为起始索引；交互：左右翻页（循环）/ Esc / 点击遮罩关闭。返回 {el, close}。 */
+export function lightbox(images, index = 0) {
+  images = images || [];
+  if (images.length === 0) return { el: null, close: () => {} };
+  let current = Math.max(0, Math.min(index, images.length - 1));
+
+  const img = el("img", { class: "fa-lightbox__img", alt: "照片预览" });
+  const caption = el("div", { class: "fa-lightbox__caption" });
+  const prevBtn = el("button", { class: "fa-lightbox__nav fa-lightbox__nav--prev", title: "上一张" }, [icon("chevron-left", 22)]);
+  const nextBtn = el("button", { class: "fa-lightbox__nav fa-lightbox__nav--next", title: "下一张" }, [icon("chevron-right", 22)]);
+  const closeBtn = el("button", { class: "fa-lightbox__close", title: "关闭（Esc）" }, [icon("close", 20)]);
+  const overlay = el("div", { class: "fa-lightbox" });
+
+  function render() {
+    const item = images[current];
+    img.src = item.src;
+    caption.textContent = [item.name, `${current + 1} / ${images.length}`].filter(Boolean).join("　·　");
+  }
+  function go(delta) {
+    current = (current + delta + images.length) % images.length;
+    render();
+  }
+  function onKey(e) {
+    if (e.key === "Escape") close();
+    else if (e.key === "ArrowLeft") go(-1);
+    else if (e.key === "ArrowRight") go(1);
+  }
+  function close() {
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  }
+
+  prevBtn.addEventListener("click", () => go(-1));
+  nextBtn.addEventListener("click", () => go(1));
+  closeBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.append(prevBtn, nextBtn, closeBtn, img, caption);
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
+  render();
+  return { el: overlay, close };
+}

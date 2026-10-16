@@ -77,9 +77,9 @@ export async function renderCompare(root, mod) {
     el("div", {}, [
       el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:12px" }, [
         el("h3", { text: `对比篮子（${items.length}/${COMPARE_MAX}）`, style: "margin:0;font-size:15px" }),
-        el("div", {}, [
+        el("div", { style: "display:flex;align-items:center;gap:10px" }, [
           btn("添加资产", { variant: "secondary", size: "sm", icon: "plus", onClick: () => openPicker(refresh) }),
-          btn("清空对比", { variant: "ghost", size: "sm", onClick: async () => { clearCompare(); refresh(); } }),
+          btn("清空对比", { variant: "danger-ghost", size: "sm", icon: "trash", onClick: async () => { clearCompare(); refresh(); } }),
         ]),
       ]),
       basket,
@@ -244,7 +244,7 @@ function openPicker(onSaved) {
   ]);
 
   const confirmLabel = el("span", { text: "加入对比" });
-  const footer = el("div", {}, [
+  const footer = el("div", { class: "fa-dialog-actions fa-dialog-actions--auto" }, [
     btn("取消", { variant: "secondary", onClick: () => m.close() }),
     el("button", {
       class: "fa-btn fa-btn--primary",

@@ -5,7 +5,7 @@ import { icon } from "./icons.js";
 import { el, errorBanner, MODULE_ICON } from "./ui.js";
 import * as finance from "./modules/finance.js";
 import * as house from "./modules/house.js";
-import * as car from "./modules/car.js";
+import * as car from "./modules/car.js?v=0.7.0"; // ?v 击穿旧缓存：M0 占位版 car.js 曾被浏览器长期缓存
 import * as memo from "./modules/memo.js";
 import * as files from "./modules/files.js";
 

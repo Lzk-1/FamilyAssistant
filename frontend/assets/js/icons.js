@@ -49,6 +49,15 @@ const ICONS = {
   alert: '<path d="M12 4 2.5 20h19Z"/><path d="M12 10v4"/><path d="M12 17.5v.01"/>',
   paperclip:
     '<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+
+  /* 选车模块（M3） */
+  star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.7l5.9-.9Z"/>',
+  image:
+    '<rect x="3" y="5" width="18" height="14" rx="2"/>' +
+    '<circle cx="8.5" cy="10" r="1.5"/>' +
+    '<path d="m5 17.5 4.5-4.5 3 3 3.5-3.5 3 3"/>',
+  "chevron-left": '<path d="m14 6-6 6 6 6"/>',
+  "chevron-right": '<path d="m10 6 6 6-6 6"/>',
 };
 
 export function icon(name, size = 16) {

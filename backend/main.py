@@ -54,6 +54,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     register_error_handlers(app)
+
+    # 静态资源禁用启发式缓存：强制走 ETag 协商（未变更 304 / 已变更即时生效），
+    # 零构建前端的模块文件更新后无需用户手动强刷（首次升级见 docs 的硬刷新说明）
+    @app.middleware("http")
+    async def static_no_cache(request: Request, call_next):
+        response = await call_next(request)
+        if not request.url.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
     app.include_router(api_router)
 
     frontend_dir = Path(__file__).resolve().parent.parent / "frontend"

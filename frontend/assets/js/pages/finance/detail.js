@@ -243,7 +243,7 @@ function openInterestDialog(asset, refresh) {
     title: "更新实际收益",
     width: "narrow",
     body,
-    footer: el("div", {}, [
+    footer: el("div", { class: "fa-dialog-actions" }, [
       btn("取消", { variant: "secondary", onClick: () => m.close() }),
       btn("保存", { variant: "primary", onClick: async () => {
         if (!(parseFloat(amountInput.value) >= 0) || !dateInput.value) { toast("请填写正确的累计收益与日期", "err"); return; }
@@ -278,7 +278,7 @@ async function handleSettle(asset, action, refresh) {
       title: "登记还款",
       width: "narrow",
       body,
-      footer: el("div", {}, [
+      footer: el("div", { class: "fa-dialog-actions" }, [
         btn("取消", { variant: "secondary", onClick: () => m.close() }),
         btn("确认还款", { variant: "primary", onClick: async () => {
           try {

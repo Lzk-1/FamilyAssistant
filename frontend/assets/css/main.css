@@ -230,6 +230,9 @@ body {
 .fa-btn--danger:hover { background: #dc2626; }
 .fa-btn--ghost { background: transparent; color: var(--primary); }
 .fa-btn--ghost:hover { background: var(--primary-soft); }
+/* 危险幽灵按钮：用于「清空/删除」等次要破坏性操作——红色表意、弱视觉权重 */
+.fa-btn--danger-ghost { background: transparent; color: var(--err); }
+.fa-btn--danger-ghost:hover { background: #fef2f2; }
 .fa-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .fa-btn svg { flex-shrink: 0; }
 
@@ -299,6 +302,20 @@ textarea.fa-input { height: auto; padding: 8px 12px; line-height: 1.5; resize: v
 .fa-modal__footer {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 12px 20px; border-top: 1px solid var(--border);
+}
+/* 弹窗底部动作条：作为 modal footer 的内层容器时补齐 flex 布局，
+   保证按钮间距、垂直居中对齐、主次按钮等宽且文字居中 */
+.fa-dialog-actions {
+  width: 100%;
+  display: flex; justify-content: flex-end; align-items: center; gap: 12px;
+}
+.fa-dialog-actions .fa-btn {
+  flex: 1 1 0; min-width: 96px; max-width: 128px;
+  justify-content: center;
+}
+/* 动态文案按钮（如「加入对比（已选 N）」）：按内容自适应宽度，避免长文案被压缩截断 */
+.fa-dialog-actions--auto .fa-btn {
+  flex: 0 1 auto; min-width: 96px; max-width: none;
 }
 
 /* Toast 通知 */
@@ -494,6 +511,65 @@ textarea.fa-input { height: auto; padding: 8px 12px; line-height: 1.5; resize: v
 .compare-picker__item:last-child { border-bottom: none; }
 .compare-picker__item:hover { background: var(--primary-soft); }
 .compare-picker__item .muted { flex: 1; font-size: 12px; color: var(--text-muted); }
+
+/* ---------- 7.x 选车模块（M3 · car-module-design §4） ---------- */
+/* 配置特点标签流（详情页） */
+.car-feature-tags { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.car-feature-tag { display: inline-flex; align-items: center; gap: 6px; background: var(--m-car-soft);
+  color: var(--m-car); border: 1px solid #a5f3fc; border-radius: var(--radius-full);
+  padding: 4px 12px; font-size: 13px; }
+.car-feature-tag b { font-weight: 600; }
+.car-feature-tag .muted { color: var(--text-muted); }
+
+/* 配置特点编辑器（车型弹窗）：预设 chips + 动态标签行 */
+.car-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
+.car-chip { border: 1px dashed var(--border-strong); background: var(--bg); color: var(--text-muted);
+  border-radius: var(--radius-full); padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.car-chip:hover { border-color: var(--m-car); color: var(--m-car); background: var(--m-car-soft); }
+
+/* 报价弹窗动态条目行（优惠/费用/赠品） */
+.car-item-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 30px;
+  gap: 8px; margin-bottom: 8px; align-items: center; }
+.car-item-row .fa-btn { justify-self: center; }
+.car-item-add { margin-top: 4px; }
+
+/* 照片墙（详情页，按外观/内饰/其他分组） */
+.car-photo-groups { display: flex; flex-direction: column; gap: var(--sp-4); }
+.car-photo-group__title { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: var(--sp-2); }
+.car-photo-wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: var(--sp-3); }
+.car-photo-cell { position: relative; }
+.car-photo-thumb { position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: var(--radius-s); overflow: hidden;
+  border: 1px solid var(--border); background: var(--bg); cursor: zoom-in; padding: 0; }
+.car-photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.car-photo-thumb__name { position: absolute; inset: auto 0 0 0; background: linear-gradient(transparent, rgba(15,23,42,.72));
+  color: #fff; font-size: 11px; padding: 14px 8px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.car-photo-thumb__del { position: absolute; top: 5px; right: 5px; background: rgba(15,23,42,.55); }
+
+/* 报价表「最优」行 */
+.row--best td { background: var(--m-car-soft); }
+
+/* 选车对比篮子（青色主题变体，复用 compare-basket__meta 结构） */
+.car-basket { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.car-basket__item { display: flex; align-items: center; gap: 10px; background: var(--m-car-soft);
+  border: 1px solid #a5f3fc; border-radius: var(--radius-s); padding: 8px 12px; min-width: 220px; }
+
+/* 对比矩阵：某车型独有配置行高亮（决策点 D3） */
+.car-compare__unique td { background: #fffbeb; }
+.car-compare__unique .compare-matrix__dim { color: #b45309; }
+
+/* Lightbox 大图预览（ui.js lightbox 组件） */
+.fa-lightbox { position: fixed; inset: 0; z-index: 1200; background: rgba(15,23,42,.94);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  animation: fadeIn 0.15s; }
+.fa-lightbox__img { max-width: 92vw; max-height: 78vh; border-radius: 8px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.fa-lightbox__caption { color: #e2e8f0; font-size: 13px; margin-top: 14px; }
+.fa-lightbox__close, .fa-lightbox__nav { position: absolute; background: rgba(255,255,255,.08); color: #e2e8f0;
+  border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.fa-lightbox__close:hover, .fa-lightbox__nav:hover { background: rgba(255,255,255,.18); }
+.fa-lightbox__close { top: 18px; right: 22px; width: 38px; height: 38px; }
+.fa-lightbox__nav { top: 50%; transform: translateY(-50%); width: 42px; height: 42px; }
+.fa-lightbox__nav--prev { left: 20px; }
+.fa-lightbox__nav--next { right: 20px; }
 
 /* ---------- 8. 响应式 ---------- */
 @media (max-width: 768px) {

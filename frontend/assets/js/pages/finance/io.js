@@ -97,7 +97,7 @@ export function openImportDialog(onRefresh) {
   const submitBtn = btn("开始导入", { variant: "primary", icon: "check", onClick: submit });
   submitBtn.disabled = true;
   const m = modal({ title: "导入理财数据", width: "narrow", body,
-    footer: el("div", { style: "display:flex;gap:10px" }, [
+    footer: el("div", { class: "fa-dialog-actions" }, [
       btn("取消", { variant: "secondary", onClick: () => m.close() }),
       submitBtn,
     ]),

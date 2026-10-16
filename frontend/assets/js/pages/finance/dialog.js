@@ -391,7 +391,7 @@ export async function openAssetDialog(asset, onSaved) {
   }
 
   // 弹窗
-  const footer = el("div", {}, [
+  const footer = el("div", { class: "fa-dialog-actions" }, [
     btn("取消", { variant: "secondary", onClick: () => m.close() }),
     btn(isEdit ? "保存" : "创建", { variant: "primary", icon: "check", onClick: submit }),
   ]);
